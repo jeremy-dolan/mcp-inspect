@@ -70,8 +70,9 @@ TOOL_INFO = {"name": "mcp-probe", "version": "0.3.0"}
 #
 # Each name says which layer its field goes out on: http_ is a request
 # header, rpc_ shapes the JSON-RPC envelope, mcp_ is payload the envelope
-# carries. Only what varies by identity is here -- header order and casing
-# and JSON compaction are unconditional, and live where they are written.
+# carries. Values live here; the rest of the mimicry lives where it is
+# written -- casing and JSON compaction unconditionally, header order only
+# under this identity.
 #
 # Captured from Claude Code 2.1.238 against a local endpoint, 2026-08-20.
 CLAUDE_CODE_VERSION = "2.1.238"
@@ -107,10 +108,8 @@ def base_headers() -> dict:
     User-Agent must not leave urllib to supply its own, and dropping their
     Accept must not leave the request with no Accept at all.
     """
-    # Insertion order survives to the wire, so it is spelled the way a real
-    # client spells it. Only this run of headers can be placed: Host,
-    # Content-length and Accept-Encoding are http.client's to emit, and it
-    # emits them ahead of these whatever this dict says.
+    # The connection layer applies WIRE_ORDER after urllib and http.client
+    # have supplied their automatic headers.
     return {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
@@ -278,11 +277,11 @@ class Journal:
         return {method: merge_replies(pages)
                 for method, pages in grouped.items()}
 
-    def record(self, verb: str, url: str, headers: dict, body: str | None,
+    def record(self, verb: str, url: str, head: list, body: str | None,
                response: "Response") -> None:
         self.exchanges.append({
             "request": {"verb": verb, "url": url,
-                        "headers": headers, "body": body},
+                        "head": head, "body": body},
             "response": {"version": response.version, "status": response.status,
                          "reason": response.reason,
                          "headers": response.headers,
@@ -368,6 +367,25 @@ WIRE_CASING = {
     "Mcp-Session-Id": "mcp-session-id",
 }
 
+# DRAFT: provisional order for evaluating the mechanism. Replace this tuple
+# with the order from a Claude Code capture before claiming an exact match.
+# Names are case-insensitive. Unlisted headers follow these in their original
+# order; repeated headers retain their relative order and values.
+WIRE_ORDER = (
+    "host",
+    "accept",
+    "content-type",
+    "user-agent",
+    "mcp-protocol-version",
+    "mcp-method",
+    "mcp-session-id",
+    "authorization",
+    "accept-encoding",
+    "content-length",
+    "connection",
+)
+WIRE_RANK = {name: rank for rank, name in enumerate(WIRE_ORDER)}
+
 
 def wire_name(name: str) -> str:
     """The capitalisation a header goes out in.
@@ -380,10 +398,43 @@ def wire_name(name: str) -> str:
 
 
 class _Cased:
-    """Header names as a real client spells them, not as urllib does."""
+    """Apply header casing and ordering at the final HTTP serialization step."""
+
+    def __init__(self, *args, **kwargs):
+        self._pending_headers = []
+        self._wire_lines = []
+        super().__init__(*args, **kwargs)
+
+    def putrequest(self, *args, **kwargs):
+        self._wire_lines.clear()
+        return super().putrequest(*args, **kwargs)
+
+    def _output(self, line):
+        # http.client calls this with the encoded request line and each
+        # validated, serialized header. Capture those bytes rather than
+        # reconstructing them from urllib's incomplete Request headers.
+        # This is a private stdlib hook; keep it covered by wire-level checks.
+        super()._output(line)
+        self._wire_lines.append(line)
 
     def putheader(self, header, *values):
-        return super().putheader(wire_name(header), *values)
+        # Include automatically generated headers in the same ordering pass.
+        # Validation is deferred to the parent's putheader below, before any
+        # request bytes are sent; values are never serialized by this mixin.
+        self._pending_headers.append((wire_name(header), values))
+
+    def endheaders(self, message_body=None, *, encode_chunked=False):
+        headers, self._pending_headers = self._pending_headers, []
+        if IDENTITY is CLAUDE_CODE_ID:
+            headers.sort(key=lambda item: WIRE_RANK.get(
+                item[0].lower(), len(WIRE_RANK)))
+        for header, values in headers:
+            super().putheader(header, *values)
+        return super().endheaders(message_body, encode_chunked=encode_chunked)
+
+    def close(self):
+        self._pending_headers.clear()
+        return super().close()
 
 
 class _CasedHTTP(_Cased, http.client.HTTPConnection):
@@ -394,12 +445,24 @@ class _CasedHTTPS(_Cased, http.client.HTTPSConnection):
     pass
 
 
-class _HTTPHandler(urllib.request.HTTPHandler):
+class _WireHandler:
+    """Keep each request's serialized head available after urllib closes it."""
+
+    def do_open(self, connection_class, req, **kwargs):
+        def connect(*args, **connection_kwargs):
+            connection = connection_class(*args, **connection_kwargs)
+            req._wire_lines = connection._wire_lines
+            return connection
+
+        return super().do_open(connect, req, **kwargs)
+
+
+class _HTTPHandler(_WireHandler, urllib.request.HTTPHandler):
     def http_open(self, req):
         return self.do_open(_CasedHTTP, req)
 
 
-class _HTTPSHandler(urllib.request.HTTPSHandler):
+class _HTTPSHandler(_WireHandler, urllib.request.HTTPSHandler):
     def https_open(self, req):
         return self.do_open(_CasedHTTPS, req, context=self._context)
 
@@ -421,14 +484,9 @@ def http_version(reply: Any) -> str:
     return f"HTTP/{number // 10}.{number % 10}" if number in (10, 11) else "HTTP"
 
 
-def sent(request: urllib.request.Request) -> dict:
-    """The headers as they went out, once urllib has added its own.
-
-    Called after the exchange, so this includes the Host and Content-length
-    urllib supplies. Names carry the capitalisation they went on the wire in,
-    which is what a case-sensitive server would have seen.
-    """
-    return {wire_name(name): value for name, value in request.header_items()}
+def sent(request: urllib.request.Request) -> list[str]:
+    """Serialized request line and headers, including automatic headers."""
+    return [line.decode("latin-1") for line in request._wire_lines]
 
 
 def http_post(url: str, payload: dict, headers: dict, timeout: float,
@@ -1354,13 +1412,11 @@ def render_transcript(exchanges: list) -> str:
     blocks = []
     for exchange in exchanges:
         request, response = exchange["request"], exchange["response"]
-        start = f"{request['verb']} {request['url']} HTTP/1.1"
         status = " ".join(str(part) for part in
                           (response["version"], response["status"], response["reason"])
                           if str(part).strip())
         blocks.append("\n".join(
-            marked(">", [safe(oneline(start))]
-                        + header_lines(request["headers"])
+            marked(">", [safe(oneline(line)) for line in request["head"]]
                         + [""] + body_lines(request["body"]))
             + [""]
             + marked("<", [safe(oneline(status))]
