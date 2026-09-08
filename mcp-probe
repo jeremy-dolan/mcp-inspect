@@ -277,11 +277,13 @@ class Journal:
         return {method: merge_replies(pages)
                 for method, pages in grouped.items()}
 
-    def record(self, verb: str, url: str, head: list, body: str | None,
-               response: "Response") -> None:
+    def record(self, head: list, body: str | None, response: "Response",
+               connection: dict) -> None:
+        # Outside "request": it describes the socket both the request and the
+        # reply travelled over, which the head does not record.
         self.exchanges.append({
-            "request": {"verb": verb, "url": url,
-                        "head": head, "body": body},
+            "connection": connection,
+            "request": {"head": head, "body": body},
             "response": {"version": response.version, "status": response.status,
                          "reason": response.reason,
                          "headers": response.headers,
@@ -403,6 +405,7 @@ class _Cased:
     def __init__(self, *args, **kwargs):
         self._pending_headers = []
         self._wire_lines = []
+        self._tls = None
         super().__init__(*args, **kwargs)
 
     def putrequest(self, *args, **kwargs):
@@ -442,16 +445,23 @@ class _CasedHTTP(_Cased, http.client.HTTPConnection):
 
 
 class _CasedHTTPS(_Cased, http.client.HTTPSConnection):
-    pass
+    def connect(self):
+        # Read while the socket is open: Connection: close means it is not
+        # by the time the transcript renders.
+        super().connect()
+        cipher = self.sock.cipher()
+        self._tls = (self.sock.version(), cipher[0] if cipher else None)
 
 
 class _WireHandler:
-    """Keep each request's serialized head available after urllib closes it."""
+    """Keep each request's head and connection facts available after urllib
+    closes it."""
 
     def do_open(self, connection_class, req, **kwargs):
         def connect(*args, **connection_kwargs):
             connection = connection_class(*args, **connection_kwargs)
             req._wire_lines = connection._wire_lines
+            req._connection = connection
             return connection
 
         return super().do_open(connect, req, **kwargs)
@@ -487,6 +497,20 @@ def http_version(reply: Any) -> str:
 def sent(request: urllib.request.Request) -> list[str]:
     """Serialized request line and headers, including automatic headers."""
     return [line.decode("latin-1") for line in request._wire_lines]
+
+
+def connection(request: urllib.request.Request) -> dict:
+    """Where the socket went and what it negotiated.
+
+    Host and port are read from the connection, not from the Host header:
+    a proxy, a virtual host or an overridden Host makes those two different
+    facts, and this is the one the bytes actually travelled to. tls is read
+    through the connection too, because it is rebound at connect time and a
+    value copied onto the request beforehand would still be None.
+    """
+    return {"host": request._connection.host,
+            "port": request._connection.port,
+            "tls": request._connection._tls}
 
 
 def http_post(url: str, payload: dict, headers: dict, timeout: float,
@@ -533,7 +557,7 @@ def http_post(url: str, payload: dict, headers: dict, timeout: float,
             raise ProbeError(f"no reply: {type(exc).__name__}: {exc}") from None
 
         if journal is not None:
-            journal.record("POST", url, sent(request), text, response)
+            journal.record(sent(request), text, response, connection(request))
 
         location = response.headers.get("Location")
         if response.status in (301, 302, 303, 307, 308) and location:
@@ -581,7 +605,7 @@ def http_delete(url: str, headers: dict, timeout: float,
     except Exception:
         return None  # Session teardown is advisory.
     if journal is not None:
-        journal.record("DELETE", url, sent(request), None, response)
+        journal.record(sent(request), None, response, connection(request))
     return response
 
 
@@ -1398,9 +1422,20 @@ def marked(mark: str, lines: Iterable[str]) -> list[str]:
     return [f"{mark} {line}" if line else mark for line in lines]
 
 
+def connection_line(conn: dict) -> str:
+    """Where the exchange went and what it travelled over, neither of which
+    the head records. Cleartext is stated, not left to be inferred from an
+    absent line."""
+    negotiated = conn["tls"]
+    detail = (" / ".join(part for part in negotiated if part)
+              if negotiated else "cleartext (no TLS)")
+    return (f"connection: {safe(oneline(str(conn['host'])))}"
+            f":{conn['port']} -- {detail}")
+
+
 def render_transcript(exchanges: list) -> str:
-    """The whole session as HTTP message text: "> " sent, "< " received, like
-    how curl -v and every RFC example write it.
+    """The whole session as HTTP message text: "* " this tool's own notes,
+    "> " sent, "< " received, like how curl -v and every RFC example write it.
 
     Every line carries its prefix, bodies included, so no byte a server
     sent can be read as a line this tool wrote; safe() then escapes
@@ -1416,7 +1451,8 @@ def render_transcript(exchanges: list) -> str:
                           (response["version"], response["status"], response["reason"])
                           if str(part).strip())
         blocks.append("\n".join(
-            marked(">", [safe(oneline(line)) for line in request["head"]]
+            marked("*", [connection_line(exchange["connection"])])
+            + marked(">", [safe(oneline(line)) for line in request["head"]]
                         + [""] + body_lines(request["body"]))
             + [""]
             + marked("<", [safe(oneline(status))]
@@ -1660,7 +1696,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     output.add_argument("--json", "-j", action="store_true",
                         help="server replies as JSON (keyed by method; pages collated)")
     output.add_argument("--transcript", "-t", action="store_true",
-                        help="verbatim HTTP exchanges including credentials (> sent, < received)")
+                        help="verbatim HTTP exchanges including credentials (* notes, > sent, < received)")
     parser.add_argument("url", metavar="URL", type=endpoint,
                         help="MCP endpoint (http:// or https://)")
     parser.add_argument("--request", "-r", action="append", dest="requests",
