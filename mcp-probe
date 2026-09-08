@@ -403,8 +403,10 @@ def wire_name(name: str) -> str:
     return WIRE_CASING.get(title, title)
 
 
-class _Cased:
-    """Apply header casing and ordering at the final HTTP serialization step."""
+class _Wire:
+    """Normalize and record the request head just before it is sent: names
+    emulate the casing and order from Claude Code, and we keep a journal of the
+    bytes that go out along with what the socket negotiated."""
 
     def __init__(self, *args, **kwargs):
         self._pending_headers = []
@@ -455,11 +457,11 @@ class _Cased:
         return super().close()
 
 
-class _CasedHTTP(_Cased, http.client.HTTPConnection):
+class _WireHTTP(_Wire, http.client.HTTPConnection):
     pass
 
 
-class _CasedHTTPS(_Cased, http.client.HTTPSConnection):
+class _WireHTTPS(_Wire, http.client.HTTPSConnection):
     def connect(self):
         # Read while the socket is open: Connection: close means it is not
         # by the time the transcript renders.
@@ -484,12 +486,12 @@ class _WireHandler:
 
 class _HTTPHandler(_WireHandler, urllib.request.HTTPHandler):
     def http_open(self, req):
-        return self.do_open(_CasedHTTP, req)
+        return self.do_open(_WireHTTP, req)
 
 
 class _HTTPSHandler(_WireHandler, urllib.request.HTTPSHandler):
     def https_open(self, req):
-        return self.do_open(_CasedHTTPS, req, context=self._context)
+        return self.do_open(_WireHTTPS, req, context=self._context)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
