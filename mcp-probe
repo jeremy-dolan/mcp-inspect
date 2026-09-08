@@ -68,34 +68,35 @@ TOOL_INFO = {"name": "mcp-probe", "version": "0.3.0"}
 # honest one, which is also how a server is caught at it: probe twice, once
 # under each identity, and diff the two reports.
 #
-# The three fields go together. A User-Agent on its own leaves
-# clientCapabilities announcing an agent that can do nothing whatever, which
-# no real client announces, and that is the louder tell of the two.
+# Each name says which layer its field goes out on: http_ is a request
+# header, rpc_ shapes the JSON-RPC envelope, mcp_ is payload the envelope
+# carries. Only what varies by identity is here -- header order and casing
+# and JSON compaction are unconditional, and live where they are written.
 #
 # Captured from Claude Code 2.1.238 against a local endpoint, 2026-08-20.
 CLAUDE_CODE_VERSION = "2.1.238"
-CLAUDE_CODE = {
-    "user_agent": f"claude-code/{CLAUDE_CODE_VERSION} (cli)",
-    "info": {
+CLAUDE_CODE_ID = {
+    "http_user_agent": f"claude-code/{CLAUDE_CODE_VERSION} (cli)",
+    "mcp_clientInfo": {
         "name": "claude-code",
         "title": "Claude Code",
         "version": CLAUDE_CODE_VERSION,
         "description": "Anthropic's agentic coding tool",
         "websiteUrl": "https://claude.com/claude-code",
     },
-    "capabilities": {"roots": {"listChanged": True}, "elicitation": {}},
-    "probe_id": "server-discover-probe-{n}",
+    "mcp_clientCapabilities": {"roots": {"listChanged": True}, "elicitation": {}},
+    "rpc_id_template": "server-discover-probe-{n}",
 }
 # urllib's default announces Python-urllib, which many edge filters block
-PROBE = {
-    "user_agent": f"{TOOL_INFO['name']}/{TOOL_INFO['version']}",
-    "info": dict(TOOL_INFO),
-    "capabilities": {},
-    "probe_id": None,
+PROBE_ID = {
+    "http_user_agent": f"{TOOL_INFO['name']}/{TOOL_INFO['version']}",
+    "mcp_clientInfo": dict(TOOL_INFO),
+    "mcp_clientCapabilities": {},
+    "rpc_id_template": None,
 }
 # The identity in force. If --identify-as-probe is passed, build_options
-# rebinds this name to PROBE before the first request goes out.
-IDENTITY = CLAUDE_CODE
+# rebinds this name to PROBE_ID before the first request goes out.
+IDENTITY = CLAUDE_CODE_ID
 
 
 def base_headers() -> dict:
@@ -113,7 +114,7 @@ def base_headers() -> dict:
     return {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
-        "User-Agent": IDENTITY["user_agent"],
+        "User-Agent": IDENTITY["http_user_agent"],
     }
 
 MODERN_VERSION = "2026-07-28"
@@ -907,7 +908,7 @@ class Transport:
         one, on a counter the probe shares, is a tell -- and the two together
         say what the client is before the server has read a single header.
         """
-        template = IDENTITY["probe_id"]
+        template = IDENTITY["rpc_id_template"]
         if method == "server/discover" and template:
             self._probes += 1
             return template.format(n=self._probes)
@@ -966,8 +967,8 @@ class ModernTransport(Transport):
         # protocolVersion and clientCapabilities are required; clientInfo is a SHOULD.
         meta = {
             META_PROTOCOL_VERSION: self.version,
-            META_CLIENT_INFO: IDENTITY["info"],
-            META_CLIENT_CAPABILITIES: IDENTITY["capabilities"],
+            META_CLIENT_INFO: IDENTITY["mcp_clientInfo"],
+            META_CLIENT_CAPABILITIES: IDENTITY["mcp_clientCapabilities"],
         }
         return {**(params or {}), "_meta": meta}
 
@@ -1026,8 +1027,8 @@ class LegacyTransport(Transport):
             "initialize",
             {
                 "protocolVersion": self.requested_version,
-                "capabilities": IDENTITY["capabilities"],
-                "clientInfo": IDENTITY["info"],
+                "capabilities": IDENTITY["mcp_clientCapabilities"],
+                "clientInfo": IDENTITY["mcp_clientInfo"],
             },
         )
         self.reporter.result(result)
@@ -1636,7 +1637,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_options(args: argparse.Namespace) -> Options:
     global IDENTITY
-    IDENTITY = PROBE if args.identify_as_probe else CLAUDE_CODE
+    IDENTITY = PROBE_ID if args.identify_as_probe else CLAUDE_CODE_ID
     headers = {}
     token = os.environ.get("MCP_AUTH_TOKEN")
     if token:
