@@ -278,11 +278,13 @@ class Journal:
                 for method, pages in grouped.items()}
 
     def record(self, head: list, body: str | None, response: "Response",
-               connection: dict) -> None:
-        # Outside "request": it describes the socket both the request and the
-        # reply travelled over, which the head does not record.
+               connection: dict, notes: Iterable[str] = ()) -> None:
+        # Both sit outside "request": connection describes the socket the
+        # request and the reply travelled over, and notes are this tool's
+        # own account of how the exchange came to be sent as it was.
         self.exchanges.append({
             "connection": connection,
+            "notes": list(notes),
             "request": {"head": head, "body": body},
             "response": {"version": response.version, "status": response.status,
                          "reason": response.reason,
@@ -406,7 +408,18 @@ class _Cased:
         self._pending_headers = []
         self._wire_lines = []
         self._tls = None
+        self._peer = None
         super().__init__(*args, **kwargs)
+
+    def connect(self):
+        # Which address the name actually resolved to is the one fact about
+        # the exchange that no header records, and the socket is the only
+        # place to read it.
+        super().connect()
+        try:
+            self._peer = self.sock.getpeername()[0]
+        except OSError:
+            self._peer = None
 
     def putrequest(self, *args, **kwargs):
         self._wire_lines.clear()
@@ -510,6 +523,7 @@ def connection(request: urllib.request.Request) -> dict:
     """
     return {"host": request._connection.host,
             "port": request._connection.port,
+            "peer": request._connection._peer,
             "tls": request._connection._tls}
 
 
@@ -535,6 +549,7 @@ def http_post(url: str, payload: dict, headers: dict, timeout: float,
     text = json.dumps(payload, separators=(",", ":"))
     body = text.encode()
     hops: list = []
+    notes: list = []
     for _ in range(4):
         request = urllib.request.Request(url, data=body, method="POST")
         for name, value in headers.items():
@@ -557,7 +572,9 @@ def http_post(url: str, payload: dict, headers: dict, timeout: float,
             raise ProbeError(f"no reply: {type(exc).__name__}: {exc}") from None
 
         if journal is not None:
-            journal.record(sent(request), text, response, connection(request))
+            journal.record(sent(request), text, response,
+                           connection(request), notes)
+        notes = []
 
         location = response.headers.get("Location")
         if response.status in (301, 302, 303, 307, 308) and location:
@@ -582,6 +599,11 @@ def http_post(url: str, payload: dict, headers: dict, timeout: float,
                     for name, value in base_headers().items():
                         headers.setdefault(name, value)
                     note = f"not sent to another origin: {', '.join(sorted(drop))}"
+            # Said against the request that follows, which is the one the
+            # headers are missing from.
+            notes = [f"redirected here from {url}"]
+            if note:
+                notes.append(note)
             url = target
             hops.append((response.status, url, note))
             continue
@@ -1429,8 +1451,10 @@ def connection_line(conn: dict) -> str:
     negotiated = conn["tls"]
     detail = (" / ".join(part for part in negotiated if part)
               if negotiated else "cleartext (no TLS)")
-    return (f"connection: {safe(oneline(str(conn['host'])))}"
-            f":{conn['port']} -- {detail}")
+    where = f"{safe(oneline(str(conn['host'])))}:{conn['port']}"
+    if conn["peer"]:
+        where += f" ({safe(oneline(conn['peer']))})"
+    return f"connection: {where} -- {detail}"
 
 
 def render_transcript(exchanges: list) -> str:
@@ -1451,7 +1475,8 @@ def render_transcript(exchanges: list) -> str:
                           (response["version"], response["status"], response["reason"])
                           if str(part).strip())
         blocks.append("\n".join(
-            marked("*", [connection_line(exchange["connection"])])
+            marked("*", [connection_line(exchange["connection"])]
+                      + [safe(oneline(note)) for note in exchange["notes"]])
             + marked(">", [safe(oneline(line)) for line in request["head"]]
                         + [""] + body_lines(request["body"]))
             + [""]
