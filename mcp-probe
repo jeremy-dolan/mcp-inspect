@@ -148,8 +148,10 @@ CONTENT_REFUSALS = frozenset((400, 501))
 
 MAX_PAGES = 50
 # How long a single value may run before it is cut short, as --truncate sets
-# it. Zero is no limit; the report then carries whatever the server sent.
-TRUNCATE_DEFAULT = 500
+# it. Zero is no limit, and is the default: a value long enough to be cut is
+# exactly where an instruction would be hidden, so the report carries whatever
+# the server sent and the reader decides what is too long.
+TRUNCATE_DEFAULT = 0
 # Every marker -- "=> ", "<= ", "== ", "!! " -- is three columns wide, so all
 # text starts at column three, whether it follows a marker or sits under one.
 # Nesting steps by two from there, as JSON is usually written.
@@ -1736,8 +1738,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "every request")
     parser.add_argument("--truncate", type=characters, default=TRUNCATE_DEFAULT,
                         metavar="CHARS",
-                        help=f"truncate long values (default: {TRUNCATE_DEFAULT}; "
-                             "0 to never truncate)")
+                        help="truncate long values to CHARS "
+                             f"(default: {TRUNCATE_DEFAULT or 'none'})")
     parser.add_argument("--header", action="append", default=[], type=header,
                         metavar="'K: V'", help="extra request header; repeatable")
     parser.add_argument("--identify-as-probe", action="store_true",

@@ -23,7 +23,7 @@ _mcp-probe() {
     '(--json -j --transcript -t)'{--transcript,-t}'[verbatim HTTP exchanges including credentials (> sent, < received)]' \
     \*{--request=,-r+}'[probe a section even if unadvertised; repeatable (default: auto-detect)]:section:->section' \
     '(--era -e)'{--era=,-e+}'[protocol era to probe (default: auto-detect)]:era:->era' \
-    '--truncate=[truncate long values (default: 500; 0 to never truncate)]:characters:->truncate' \
+    '--truncate=[truncate long values to CHARS (default: none)]:characters:->truncate' \
     \*'--header=[extra request header; repeatable]:header:->header' \
     "--identify-as-probe[announce as mcp-probe, don't impersonate Claude Code]" \
     '--timeout=[per-request timeout in seconds (default: 30)]:seconds:->timeout' \
