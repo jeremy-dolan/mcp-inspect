@@ -1,6 +1,6 @@
 # mcp-probe
 
-Probe what an MCP server offers (and see what it injects into context).
+Inspect MCP server metadata and available tools, resources, and prompts
 
 mcp-probe will query an MCP endpoint over HTTP(S), reporting general server
 information as well as available features (tools, resources, and prompts).
@@ -23,17 +23,18 @@ Public domain under [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
 ```
 mcp-probe [--json | --transcript] [--request {info,tools,resources,prompts}]
           [--era {auto,modern,legacy}] [--truncate CHARS] [--header 'K: V']
-          [--timeout SECONDS] [--help] [--version]  URL
+          [--identify-as-probe] [--timeout SECONDS] [--help] [--version]  URL
 ```
 
 | Option | |
 | --- | --- |
 | `--json`, `-j` | server replies as JSON (keyed by method; pages collated) |
 | `--transcript`, `-t` | verbatim HTTP exchanges including credentials (`>` sent, `<` received) |
-| `--request`, `-r` | probe this section even if unadvertised; repeatable (default: auto-detect) |
+| `--request`, `-r` | probe a section even if unadvertised; repeatable (default: auto-detect) |
 | `--era`, `-e` | protocol era to probe (default: auto-detect). `modern` = 2026-07-28 and later: stateless, per-request metadata, no handshake. `legacy` = 2025-11-25 and earlier: `initialize` handshake, then an `Mcp-Session-Id` header on every request |
 | `--truncate` | truncate long values (default: 500; 0 to never truncate) |
 | `--header` | extra request header; repeatable |
+| `--identify-as-probe` | announce as mcp-probe, don't impersonate Claude Code |
 | `--timeout` | per-request timeout in seconds (default: 30) |
 
 Exit status is 0 if the probe completes, 1 if it fails, 2 on a usage error.
@@ -119,7 +120,7 @@ $ mcp-probe https://example.com/mcp
      }
    ]
 
--- prompts/list request not sent (capability not advertised)
+== prompts/list request not sent (capability not advertised)
 
 ─SUMMARY───────────────────────────────────────────────────────────────────────
    endpoint       https://example.com/mcp

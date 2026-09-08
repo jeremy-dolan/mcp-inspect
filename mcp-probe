@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Probe what an MCP server offers (and see what it injects into context)
-Author: Jeremy Dolan/Claude-Opus-5 on 2026-08-16
+Inspect MCP server metadata and available tools, resources, and prompts
 
 Speaks both eras of the Streamable HTTP transport:
 
@@ -10,7 +9,7 @@ Speaks both eras of the Streamable HTTP transport:
   legacy  2025-11-25 and earlier -- initialize handshake, notifications/
           initialized, Mcp-Session-Id on every subsequent request.
 
-Default output is one section per HTTP exchange, as the exchanges happened:
+Default output is one section per HTTP exchange, as the exchanges happen:
 
   => POST tools/list                       what was asked for
   <= 200 OK  application/json              what came back
@@ -35,6 +34,11 @@ Additionally, two data streaming modes are available:
                bodies exactly as they went over the wire, nothing withheld --
                including whatever credentials the request carried
 
+By default the probe impersonates a real client (Claude Code) so that a server
+which serves auditors one set of tool descriptions and real clients another
+answers as though to a real client. --identify-as-probe announces mcp-probe
+instead.
+
 Server text can carry terminal escape sequences, so every string that reaches
 the terminal is escaped first; see safe() below.
 """
@@ -55,20 +59,62 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
-CLIENT_INFO = {"name": "mcp-probe", "version": "0.3"}
-# urllib's default announces Python-urllib, which edge filters block on sight.
-USER_AGENT = f"{CLIENT_INFO['name']}/{CLIENT_INFO['version']}"
+TOOL_INFO = {"name": "mcp-probe", "version": "0.3.0"}
 
-# What this tool sends on its own, before the caller adds anything to it.
-# A cross-origin redirect falls back to these, because a --header may
-# override one of them rather than add a new one: dropping the caller's
-# User-Agent must not leave urllib to supply its own, and dropping their
-# Accept must not leave the request with no Accept at all.
-BASE_HEADERS = {
-    "Content-Type": "application/json",
-    "Accept": "application/json, text/event-stream",
-    "User-Agent": USER_AGENT,
+# A server with something to hide has every reason to behave when it can tell
+# it is being audited, and the client's identity is what it would read to find
+# out. So the identity presented is a real client's, and what comes back is
+# what that client would have been served. --identify-as-probe asks for the
+# honest one, which is also how a server is caught at it: probe twice, once
+# under each identity, and diff the two reports.
+#
+# The three fields go together. A User-Agent on its own leaves
+# clientCapabilities announcing an agent that can do nothing whatever, which
+# no real client announces, and that is the louder tell of the two.
+#
+# Captured from Claude Code 2.1.238 against a local endpoint, 2026-08-20.
+CLAUDE_CODE_VERSION = "2.1.238"
+CLAUDE_CODE = {
+    "user_agent": f"claude-code/{CLAUDE_CODE_VERSION} (cli)",
+    "info": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "version": CLAUDE_CODE_VERSION,
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+    },
+    "capabilities": {"roots": {"listChanged": True}, "elicitation": {}},
+    "probe_id": "server-discover-probe-{n}",
 }
+# urllib's default announces Python-urllib, which many edge filters block
+PROBE = {
+    "user_agent": f"{TOOL_INFO['name']}/{TOOL_INFO['version']}",
+    "info": dict(TOOL_INFO),
+    "capabilities": {},
+    "probe_id": None,
+}
+# The identity in force. If --identify-as-probe is passed, build_options
+# rebinds this name to PROBE before the first request goes out.
+IDENTITY = CLAUDE_CODE
+
+
+def base_headers() -> dict:
+    """What this tool sends on its own, before the caller adds anything to it.
+
+    A cross-origin redirect falls back to these, because a --header may
+    override one of them rather than add a new one: dropping the caller's
+    User-Agent must not leave urllib to supply its own, and dropping their
+    Accept must not leave the request with no Accept at all.
+    """
+    # Insertion order survives to the wire, so it is spelled the way a real
+    # client spells it. Only this run of headers can be placed: Host,
+    # Content-length and Accept-Encoding are http.client's to emit, and it
+    # emits them ahead of these whatever this dict says.
+    return {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": IDENTITY["user_agent"],
+    }
 
 MODERN_VERSION = "2026-07-28"
 LEGACY_VERSION = "2025-11-25"
@@ -104,7 +150,7 @@ MAX_PAGES = 50
 # How long a single value may run before it is cut short, as --truncate sets
 # it. Zero is no limit; the report then carries whatever the server sent.
 TRUNCATE_DEFAULT = 500
-# Every marker -- "=> ", "<= ", "-- ", "!! " -- is three columns wide, so all
+# Every marker -- "=> ", "<= ", "== ", "!! " -- is three columns wide, so all
 # text starts at column three, whether it follows a marker or sits under one.
 # Nesting steps by two from there, as JSON is usually written.
 MARGIN = "   "
@@ -184,9 +230,9 @@ def merge_replies(pages: list) -> dict:
     An error anywhere discards the pages that succeeded, because a short
     list that looks whole is a worse answer than the failure that made it.
 
-    id is dropped: it is our own counter (see Transport.request_id), not
-    anything the server said, and there is nothing left to correlate once
-    the replies are keyed by method.
+    id is dropped: it is this end's own numbering (see
+    Transport.request_id), not anything the server said, and there is
+    nothing left to correlate once the replies are keyed by method.
     """
     for page in pages:
         if isinstance(page.get("error"), dict):
@@ -304,6 +350,59 @@ def origin(url: str) -> tuple:
     return (parts.scheme, (parts.hostname or "").lower(), port)
 
 
+# The SDK a real client is built on spells the MCP headers in lower case and
+# every other header in title case. urllib title-cases the lot, which would
+# put Mcp-Method on the wire in a capitalisation no real client sends. A
+# server reading headers properly cannot tell the difference; one fishing for
+# probes can.
+#
+# Connection is left alone. urllib hardcodes "close" where a real client keeps
+# its connection alive, but claiming keep-alive on a reply that arrives as
+# text/event-stream with no Content-Length would leave the read waiting on a
+# server that has no reason to hang up. A fingerprint is worth less than a
+# probe that finishes.
+WIRE_CASING = {
+    "Mcp-Protocol-Version": "mcp-protocol-version",
+    "Mcp-Method": "mcp-method",
+    "Mcp-Session-Id": "mcp-session-id",
+}
+
+
+def wire_name(name: str) -> str:
+    """The capitalisation a header goes out in.
+
+    urllib title-cases every name it sends, so that is the default; the ones
+    the SDK spells in lower case are put back.
+    """
+    title = name.title()
+    return WIRE_CASING.get(title, title)
+
+
+class _Cased:
+    """Header names as a real client spells them, not as urllib does."""
+
+    def putheader(self, header, *values):
+        return super().putheader(wire_name(header), *values)
+
+
+class _CasedHTTP(_Cased, http.client.HTTPConnection):
+    pass
+
+
+class _CasedHTTPS(_Cased, http.client.HTTPSConnection):
+    pass
+
+
+class _HTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_CasedHTTP, req)
+
+
+class _HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_CasedHTTPS, req, context=self._context)
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Redirects are followed by hand so that POST stays POST."""
 
@@ -311,7 +410,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPENER = urllib.request.build_opener(_NoRedirect)
+# build_opener drops the default handler of any class these subclass.
+_OPENER = urllib.request.build_opener(_NoRedirect, _HTTPHandler, _HTTPSHandler)
 
 
 def http_version(reply: Any) -> str:
@@ -321,13 +421,13 @@ def http_version(reply: Any) -> str:
 
 
 def sent(request: urllib.request.Request) -> dict:
-    """The headers as urllib sent them, once it has added its own.
+    """The headers as they went out, once urllib has added its own.
 
     Called after the exchange, so this includes the Host and Content-length
-    urllib supplies -- and the capitalisation it imposes on ours, which is
-    what a case-sensitive server would have seen.
+    urllib supplies. Names carry the capitalisation they went on the wire in,
+    which is what a case-sensitive server would have seen.
     """
-    return dict(request.header_items())
+    return {wire_name(name): value for name, value in request.header_items()}
 
 
 def http_post(url: str, payload: dict, headers: dict, timeout: float,
@@ -346,7 +446,10 @@ def http_post(url: str, payload: dict, headers: dict, timeout: float,
     sensitive names the headers to drop, lowercased, on top of the ones
     that are always credentials.
     """
-    text = json.dumps(payload)
+    # Separators without spaces, because that is what a JSON serializer
+    # leaves behind when nobody has asked it to pretty-print, and the probe
+    # travels under a client that has not.
+    text = json.dumps(payload, separators=(",", ":"))
     body = text.encode()
     hops: list = []
     for _ in range(4):
@@ -393,7 +496,7 @@ def http_post(url: str, payload: dict, headers: dict, timeout: float,
                     # A dropped header may have been an override rather than
                     # an addition, so what this tool would have sent on its
                     # own takes its place.
-                    for name, value in BASE_HEADERS.items():
+                    for name, value in base_headers().items():
                         headers.setdefault(name, value)
                     note = f"not sent to another origin: {', '.join(sorted(drop))}"
             url = target
@@ -472,7 +575,7 @@ def is_reply(message: dict) -> bool:
     return "result" in message or isinstance(message.get("error"), dict)
 
 
-def select(messages: list[dict], request_id: int) -> dict | None:
+def select(messages: list[dict], request_id: int | str) -> dict | None:
     """Pick the reply to our request, ignoring any notifications alongside it."""
     for message in messages:
         if message.get("id") == request_id and is_reply(message):
@@ -668,7 +771,7 @@ class Reporter:
         # "request" names what did not go out: the => line above names a verb
         # and a method, and this line has only the method to go on.
         self.write(
-            f"-- {safe(oneline(method))} request not sent ({safe(oneline(reason))})")
+            f"== {safe(oneline(method))} request not sent ({safe(oneline(reason))})")
 
     def note(self, text: str) -> None:
         self.body(f"{MARGIN}{safe(oneline(text))}")
@@ -778,7 +881,7 @@ class Options:
         return frozenset(name.lower() for name in self.extra_headers)
 
     def headers(self, **overrides: str) -> dict:
-        merged = dict(BASE_HEADERS)
+        merged = base_headers()
         merged.update(overrides)
         merged.update(self.extra_headers)
         return merged
@@ -793,13 +896,27 @@ class Transport:
         self.options = options
         self.reporter = options.reporter
         self._next_id = 0
+        self._probes = 0
 
-    def request_id(self) -> int:
+    def request_id(self, method: str) -> int | str:
+        """The id this request goes out under.
+
+        A real client numbers its requests from zero, and gives the discover
+        probe a string id off a counter of its own, so that the probe never
+        spends a number the session goes on to use. Numbering that starts at
+        one, on a counter the probe shares, is a tell -- and the two together
+        say what the client is before the server has read a single header.
+        """
+        template = IDENTITY["probe_id"]
+        if method == "server/discover" and template:
+            self._probes += 1
+            return template.format(n=self._probes)
+        number = self._next_id
         self._next_id += 1
-        return self._next_id
+        return number
 
     def exchange(self, method: str, params: dict, headers: dict) -> tuple[Response, dict | None]:
-        request_id = self.request_id()
+        request_id = self.request_id(method)
         payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
         self.reporter.request("POST", method, params)
         try:
@@ -849,8 +966,8 @@ class ModernTransport(Transport):
         # protocolVersion and clientCapabilities are required; clientInfo is a SHOULD.
         meta = {
             META_PROTOCOL_VERSION: self.version,
-            META_CLIENT_CAPABILITIES: {},
-            META_CLIENT_INFO: CLIENT_INFO,
+            META_CLIENT_INFO: IDENTITY["info"],
+            META_CLIENT_CAPABILITIES: IDENTITY["capabilities"],
         }
         return {**(params or {}), "_meta": meta}
 
@@ -858,7 +975,7 @@ class ModernTransport(Transport):
         # Mcp-Name is required only for tools/call, resources/read and
         # prompts/get, none of which this tool issues.
         return self.options.headers(
-            **{"MCP-Protocol-Version": self.version, "Mcp-Method": method}
+            **{"Mcp-Method": method, "MCP-Protocol-Version": self.version}
         )
 
     def probe(self) -> tuple[Response, dict | None]:
@@ -909,8 +1026,8 @@ class LegacyTransport(Transport):
             "initialize",
             {
                 "protocolVersion": self.requested_version,
-                "capabilities": {},
-                "clientInfo": CLIENT_INFO,
+                "capabilities": IDENTITY["capabilities"],
+                "clientInfo": IDENTITY["info"],
             },
         )
         self.reporter.result(result)
@@ -1413,11 +1530,9 @@ class ArgumentParser(argparse.ArgumentParser):
 class HelpFormatter(argparse.HelpFormatter):
     """Keep --help and --version in the usage line but out of the option list.
 
-    Both are in every CLI and neither says anything about this one, so the
-    list is left to the options that do. This is the only hook that sees the
-    list without seeing the usage line: the usage line is formatted straight
-    from the parser's actions, so it still names them. argparse.SUPPRESS
-    would have taken them out of both.
+    This is the only hook that sees the list without seeing the usage line: the
+    usage line is formatted straight from the parser's actions, so it still
+    names them. argparse.SUPPRESS would have taken them out of both.
     """
     def add_argument(self, action):
         if not {"--help", "--version"}.intersection(action.option_strings):
@@ -1475,7 +1590,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="mcp-probe",
         add_help=False,
         formatter_class=HelpFormatter,
-        description="Probe what an MCP server offers (and see what it injects into context)",
+        description="Inspect MCP server metadata and available tools, resources, and prompts",
         epilog="environment:\n"
                "  MCP_AUTH_TOKEN  if set, sent as an Authorization: Bearer header\n"
                "\n"
@@ -1493,7 +1608,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="MCP endpoint (http:// or https://)")
     parser.add_argument("--request", "-r", action="append", dest="requests",
                         choices=CHOICES, metavar="{info,tools,resources,prompts}",
-                        help="probe this section even if unadvertised; repeatable (default: auto-detect)")
+                        help="probe a section even if unadvertised; repeatable (default: auto-detect)")
     parser.add_argument("--era", "-e", choices=("auto", "modern", "legacy"), default="auto",
                         help="protocol era to probe (default: auto-detect). "
                              "modern = 2026-07-28 and later: stateless, "
@@ -1507,17 +1622,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "0 to never truncate)")
     parser.add_argument("--header", action="append", default=[], type=header,
                         metavar="'K: V'", help="extra request header; repeatable")
+    parser.add_argument("--identify-as-probe", action="store_true",
+                        help="announce as mcp-probe, don't impersonate Claude Code")
     parser.add_argument("--timeout", type=float, default=30.0, metavar="SECONDS",
                         help="per-request timeout in seconds (default: 30)")
     parser.add_argument("--help", action="help",
                         help="show this help message and exit")
     parser.add_argument("--version", action="version",
-                        version=f"{CLIENT_INFO['name']} {CLIENT_INFO['version']}",
+                        version=f"{TOOL_INFO['name']} {TOOL_INFO['version']}",
                         help="show version number and exit")
     return parser.parse_args(argv)
 
 
 def build_options(args: argparse.Namespace) -> Options:
+    global IDENTITY
+    IDENTITY = PROBE if args.identify_as_probe else CLAUDE_CODE
     headers = {}
     token = os.environ.get("MCP_AUTH_TOKEN")
     if token:
