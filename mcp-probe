@@ -69,15 +69,16 @@ TOOL_INFO = {"name": "mcp-probe", "version": "0.3.0"}
 # under each identity, and diff the two reports.
 #
 # Each name says which layer its field goes out on: http_ is a request
-# header, rpc_ shapes the JSON-RPC envelope, mcp_ is payload the envelope
-# carries. Values live here; the rest of the mimicry lives where it is
-# written -- casing and JSON compaction unconditionally, header order only
-# under this identity.
+# header or how one is sent, rpc_ shapes the JSON-RPC envelope, mcp_ is
+# payload the envelope carries. Values live here; the rest of the mimicry
+# lives where it is written -- casing and JSON compaction unconditionally,
+# header order under whichever identity asks for it.
 #
 # Captured from Claude Code 2.1.238 against a local endpoint, 2026-08-20.
 CLAUDE_CODE_VERSION = "2.1.238"
 CLAUDE_CODE_ID = {
     "http_user_agent": f"claude-code/{CLAUDE_CODE_VERSION} (cli)",
+    "http_header_sorting": True,
     "mcp_clientInfo": {
         "name": "claude-code",
         "title": "Claude Code",
@@ -91,6 +92,7 @@ CLAUDE_CODE_ID = {
 # urllib's default announces Python-urllib, which many edge filters block
 PROBE_ID = {
     "http_user_agent": f"{TOOL_INFO['name']}/{TOOL_INFO['version']}",
+    "http_header_sorting": False,
     "mcp_clientInfo": dict(TOOL_INFO),
     "mcp_clientCapabilities": {},
     "rpc_id_template": None,
@@ -108,8 +110,8 @@ def base_headers() -> dict:
     User-Agent must not leave urllib to supply its own, and dropping their
     Accept must not leave the request with no Accept at all.
     """
-    # The connection layer applies WIRE_ORDER after urllib and http.client
-    # have supplied their automatic headers.
+    # The connection layer sorts these after urllib and http.client have
+    # supplied their automatic headers.
     return {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
@@ -373,24 +375,15 @@ WIRE_CASING = {
     "Mcp-Session-Id": "mcp-session-id",
 }
 
-# DRAFT: provisional order for evaluating the mechanism. Replace this tuple
-# with the order from a Claude Code capture before claiming an exact match.
-# Names are case-insensitive. Unlisted headers follow these in their original
-# order; repeated headers retain their relative order and values.
-WIRE_ORDER = (
-    "host",
-    "accept",
-    "content-type",
-    "user-agent",
-    "mcp-protocol-version",
-    "mcp-method",
-    "mcp-session-id",
-    "authorization",
-    "accept-encoding",
-    "content-length",
-    "connection",
-)
-WIRE_RANK = {name: rank for rank, name in enumerate(WIRE_ORDER)}
+# Claude Code (2.1.238, 2.1.263) sorts headers byte-wise, on the name as it is
+# spelled/capitalized; then the runtime appends these three afterwards.
+WIRE_TAIL = ("connection", "host", "content-length")
+WIRE_TAIL_RANK = {name: rank for rank, name in enumerate(WIRE_TAIL)}
+
+def wire_rank(name: str) -> tuple:
+    """Where a header sorts, once it is spelled the way it goes out."""
+    tail = WIRE_TAIL_RANK.get(name.lower())
+    return (1, tail, "") if tail is not None else (0, 0, name)
 
 
 def wire_name(name: str) -> str:
@@ -404,9 +397,12 @@ def wire_name(name: str) -> str:
 
 
 class _Wire:
-    """Normalize and record the request head just before it is sent: names
-    emulate the casing and order from Claude Code, and we keep a journal of the
-    bytes that go out along with what the socket negotiated."""
+    """Normalize and record the request head just before it is sent: names take
+    the casing from the MCP SDK, and the ordering from Claude Code when that
+    identity is in force. the bytes that go out are kept, with what the socket
+    reported."""
+
+
 
     def __init__(self, *args, **kwargs):
         self._pending_headers = []
@@ -445,9 +441,8 @@ class _Wire:
 
     def endheaders(self, message_body=None, *, encode_chunked=False):
         headers, self._pending_headers = self._pending_headers, []
-        if IDENTITY is CLAUDE_CODE_ID:
-            headers.sort(key=lambda item: WIRE_RANK.get(
-                item[0].lower(), len(WIRE_RANK)))
+        if IDENTITY["http_header_sorting"]:
+            headers.sort(key=lambda item: wire_rank(item[0]))
         for header, values in headers:
             super().putheader(header, *values)
         return super().endheaders(message_body, encode_chunked=encode_chunked)
