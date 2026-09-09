@@ -1816,12 +1816,13 @@ def main(argv: list[str] | None = None) -> int:
         verdict = getattr(error, "verdict", NO_MCP)
         # The report is where a failure belongs, in the section that hit it
         # and in the order it happened. stderr is for when there is no
-        # report to put it in: a usage error, or a raw mode whose stdout is
-        # a data stream that a message would corrupt.
+        # report to put it in. A transcript already carries the refusal;
+        # keep stderr quiet unless there is no exchange to show. JSON mode
+        # still needs a diagnostic alongside its machine-readable output.
         if not getattr(error, "reported", False):
             if options.reporter.enabled:
                 options.reporter.problem(oneline(str(error)))
-            else:
+            elif not args.transcript or not options.journal.exchanges:
                 print(f"mcp-inspect: {safe(oneline(str(error)))}", file=sys.stderr)
     finally:
         if transport is not None:
