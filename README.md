@@ -146,7 +146,7 @@ $ mcp-probe https://example.com/mcp
      (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05,
      2024-10-07)
 
-!! JSON-RPC response indicates modern-era MCP method was refused
+!! server/discover refused: not a modern MCP server; will try legacy handshake
 
 => POST initialize
 <= 200 OK  text/event-stream

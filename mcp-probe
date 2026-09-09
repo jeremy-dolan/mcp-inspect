@@ -151,6 +151,9 @@ FALLBACK_STATUSES = frozenset((200, 400, 404, 405, 501))
 # headers returns.
 CONTENT_REFUSALS = frozenset((400, 501))
 
+# When modern protocol fails and we are auto-detecting rather than stopping.
+FALLBACK_CLAUSE = "; will try legacy handshake"
+
 MAX_PAGES = 50
 # How long a single value may run before it is cut short, as --truncate sets
 # it. Zero is no limit, and is the default: a value long enough to be cut is
@@ -1260,6 +1263,16 @@ def detect(options: Options, era: str) -> tuple[Transport, dict]:
         options.reporter.result(result)
         return modern, result
 
+    # Both eras are JSON-RPC over this same POST, so the handshake is worth a
+    # try only where the modern request itself might have been what was
+    # refused. A JSON-RPC error leaves that open. A reply carrying no
+    # JSON-RPC message has already shown what this endpoint serves, and
+    # asking again in a different envelope gets the same thing back.
+    retry = message is not None or (response.status in CONTENT_REFUSALS
+                                    and not refuses_post(response))
+    fall_back = (era != "modern" and response.status in FALLBACK_STATUSES
+                 and retry)
+
     error = message.get("error") if message else None
     if isinstance(error, dict):
         code = error.get("code")
@@ -1273,33 +1286,42 @@ def detect(options: Options, era: str) -> tuple[Transport, dict]:
             raise ProbeError(
                 f"server/discover rejected: {oneline(error.get('message'))} "
                 f"(code {code})", reported=reported, verdict=MCP_REFUSED)
-        # It answered in JSON-RPC, so something is listening, but not with a
-        # code that says which era it belongs to. The error above is the
-        # evidence; do not go on to claim nothing replied.
-        headline = "JSON-RPC response indicates modern-era MCP method was refused"
+        # server/discover is required of a modern-era server, and only the
+        # codes in MODERN_ERRORS are errors the modern era defines, so a
+        # refusal outside that set rules the modern era out. It does not
+        # rule the legacy era in: a JSON-RPC endpoint serving no MCP at all
+        # refuses the same way, which is why the verdict stays NO_MCP
+        # unless the handshake below goes on to find one.
+        headline = "server/discover refused"
+        reading = "not a modern MCP server"
         advice = ""
-        stopped = f"server/discover refused (HTTP {response.status})"
+        stopped = ("not a modern MCP server; server/discover refused "
+                   f"(HTTP {response.status})")
         verdict = NO_MCP
     else:
         options.reporter.evidence(response)
         headline = why_not_jsonrpc(response)
+        reading = ""
         advice = diagnose(response, options.url)
         stopped = f"server/discover: HTTP {response.status}, {headline}"
         verdict = NO_JSONRPC
 
-    reported = options.reporter.problem(headline)
-    options.reporter.hint(advice)
-    stop = ProbeError(stopped, reported=reported, verdict=verdict)
+    if fall_back:
+        # Both failures above lead here, so both say so, and the line ends
+        # in what the tool does next rather than leaving the reader to
+        # infer it from the section that follows. It trails whichever half
+        # of the finding came last.
+        if reading:
+            reading += FALLBACK_CLAUSE
+        else:
+            headline += FALLBACK_CLAUSE
 
-    # Both eras are JSON-RPC over this same POST, so the handshake is worth a
-    # try only where the modern request itself might have been what was
-    # refused. A JSON-RPC error leaves that open. A reply carrying no
-    # JSON-RPC message has already shown what this endpoint serves, and
-    # asking again in a different envelope gets the same thing back.
-    retry = message is not None or (response.status in CONTENT_REFUSALS
-                                    and not refuses_post(response))
-    if era == "modern" or response.status not in FALLBACK_STATUSES or not retry:
-        raise stop
+    reported = options.reporter.problem(headline, reading)
+    if not fall_back:
+        # Advice is for a reader to act on, which is worth printing only
+        # where the probe has stopped and left the next move to them.
+        options.reporter.hint(advice)
+        raise ProbeError(stopped, reported=reported, verdict=verdict)
 
     transport = LegacyTransport(options)
     return transport, transport.describe()
