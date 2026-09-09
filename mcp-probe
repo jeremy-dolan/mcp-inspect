@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Jeremy Dolan
+# Licensed under the MIT License. See LICENSE for details.
+
 """
 Inspect MCP server metadata and available tools, resources, and prompts
 
@@ -1212,7 +1215,8 @@ def diagnose(response: Response, url: str) -> str:
     explained; what belongs here is the next thing to try.
     """
     if response.status == 401 or response.headers.get("WWW-Authenticate"):
-        return "Set MCP_AUTH_TOKEN, or pass --header 'Authorization: ...'"
+        return ("Set the MCP_AUTH_TOKEN environment variable, "
+                "or pass --header 'Authorization: ...'")
     if response.status in (403, 429) and "json" not in response.content_type:
         return ("A non-JSON body at this status is usually an edge filter, "
                 "often on the User-Agent; try --header 'User-Agent: ...'")

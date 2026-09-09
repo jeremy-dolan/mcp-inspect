@@ -18,18 +18,17 @@ Uses:
   to compare server responses across time (monitoring for changes) or across
   identities (with `--identify-as-probe`).
 
-By default, mcp-probe impersonates Claude Code to examine what a server would
-present to a real agent. A malicious server might otherwise recognize an
+By default, mcp-probe impersonates Claude Code to examine what a server
+presents to real agents. A malicious server might otherwise recognize an
 auditing tool and return sanitized responses ("cloaking"). See [Client
 identity](#client-identity) for details and limitations.
 
-
 > [!NOTE]
-> `MCP_AUTH_TOKEN`, if set, will be sent as an `Authorization: Bearer` header.
-> Credentials are **not redacted** from `--transcript` output, so take care
-> when sharing it. Redirects to a different origin (a change of scheme, host,
-> or port) drop the `Authorization` header and any custom `--header` you passed;
-> the tool also prints a notice.
+> Set the `MCP_AUTH_TOKEN` environment variable to include an `Authorization:
+> Bearer` header with requests. Credentials are *not redacted* from
+> `--transcript` output, so take care when sharing it. Cross-origin redirects
+> (changes in scheme, host, or port) drop the `Authorization` header and any
+> custom `--header` you passed; the tool will print a notice.
 
 
 ## MCP Security and You
