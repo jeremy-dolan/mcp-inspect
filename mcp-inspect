@@ -15,7 +15,7 @@ Speaks both eras of the Streamable HTTP transport:
 Default output is one section per HTTP exchange, as the exchanges happen:
 
   => POST tools/list                       what was asked for
-  <= 200 OK  application/json              what came back
+  <= 200 OK (application/json)             what came back
                                            (blank line, as in HTTP)
     "tools": [ ... ]                       the result, as JSON
 
@@ -807,7 +807,7 @@ class Reporter:
         self.write(f"=> {verb} {safe(oneline(method))}")
 
     def response(self, response: Response) -> None:
-        """The status line as HTTP wrote it: code, reason, content type."""
+        """HTTP status and reason, with the content type in parentheses."""
         if not self.enabled:
             return
         for status, destination, note in response.hops:
@@ -822,10 +822,7 @@ class Reporter:
         # of it: the difference is sometimes the answer.
         content_type = response.headers.get("Content-Type")
         if content_type:
-            line += f"  {safe(oneline(content_type))}"
-        session = response.headers.get("Mcp-Session-Id")
-        if session:
-            line += f"  Mcp-Session-Id: {safe(oneline(session))}"
+            line += f" ({safe(oneline(content_type))})"
         self.write(line)
         self.in_body = False
 
