@@ -1,8 +1,8 @@
-# mcp-probe
+# mcp-inspect
 
-Inspect MCP server metadata and available tools, resources, and prompts
+Examine an MCP server's metadata, tools, resources, and prompts
 
-mcp-probe is a standalone CLI utility for examining MCP servers over HTTP(S).
+mcp-inspect is a standalone CLI utility for probing MCP servers over HTTP(S).
 By default, it prints server metadata and all available tools, resources, and
 prompts. It requires only Python 3.7+, with no third-party dependencies. Both
 the modern, stateless protocol (versions >= 2026-07-28) and legacy mode (<=
@@ -18,7 +18,7 @@ Uses:
   to compare server responses across time (monitoring for changes) or across
   identities (with `--identify-as-probe`).
 
-By default, mcp-probe impersonates Claude Code to examine what a server
+By default, mcp-inspect impersonates Claude Code to examine what a server
 presents to real agents. A malicious server might otherwise recognize an
 auditing tool and return sanitized responses ("cloaking"). See [Client
 identity](#client-identity) for details and limitations.
@@ -49,14 +49,14 @@ necessarily distinguish them from innocuous guidance. See [Huang et al.,
 2026](https://arxiv.org/abs/2603.22489) for an analysis of this attack surface
 and how the evaluated MCP clients fared.
 
-mcp-probe makes the instructions from an MCP server visible, allowing you to
+mcp-inspect makes the instructions from an MCP server visible, allowing you to
 read them before you connect an agent to the server. (Server text containing
 terminal escape sequences is sanitized before printing.) You can examine tool
 and parameter definitions and other instructions for suspicious directives:
 unnecessary requests for sensitive information, unrelated actions presented as
 necessary steps, or attempts to override an agent's existing instructions.
 Manual review can help you make an informed decision about trust, but it cannot
-fully certify a server's behavior. mcp-probe examines server metadata and
+fully certify a server's behavior. mcp-inspect examines server metadata and
 discovery responses; it does not execute tools, retrieve resource contents, or
 fetch prompts. For a broader treatment of malicious server behavior and the
 limits of detection, see Zhao et al., 2025, [When MCP Servers
@@ -76,7 +76,7 @@ A malicious server might send harmless definitions to auditing tools while
 supplying its payload to agents. This tool therefore impersonates a real agent
 by default to avoid this selective behavior.
 
-`mcp-probe` matches Claude Code 2.1.238 as captured on the wire:
+`mcp-inspect` matches Claude Code 2.1.238 as captured on the wire:
 * **HTTP layer:** User-Agent string, header order, header casing
 * **JSON-RPC layer:** JSON compaction style, JSON-RPC `id` scheme
 * **MCP layer:** `clientInfo` (name, title, version, description, websiteUrl),
@@ -88,12 +88,12 @@ forces `Connection: close`; Claude Code uses `keep-alive`) and TLS level
 (Python's `ssl` is normally backed by OpenSSL; Claude Code uses Bun backed by
 BoringSSL; so negotiation presumably differs greatly).
 
-Use `--identify-as-probe` to announce mcp-probe's own identity instead. Run
+Use `--identify-as-probe` to announce mcp-inspect's own identity instead. Run
 both modes and compare their responses to look for evidence of cloaking:
 
 ```sh
-mcp-probe --json https://example.com/mcp > as-client.json
-mcp-probe --json --identify-as-probe https://example.com/mcp > as-probe.json
+mcp-inspect --json https://example.com/mcp > as-client.json
+mcp-inspect --json --identify-as-probe https://example.com/mcp > as-probe.json
 ```
 and then compare with [diff-json](https://github.com/jeremy-dolan/terminal-tools/blob/main/bin/diff-json) or your JSON differ of choice.
 
@@ -101,9 +101,9 @@ and then compare with [diff-json](https://github.com/jeremy-dolan/terminal-tools
 ## Usage
 
 ```
-mcp-probe [--json | --transcript] [--request {info,tools,resources,prompts}]
-          [--era {auto,modern,legacy}] [--truncate CHARS] [--header 'K: V']
-          [--identify-as-probe] [--timeout SECONDS] [--help] [--version]  URL
+mcp-inspect [--json | --transcript] [--request {info,tools,resources,prompts}]
+            [--era {auto,modern,legacy}] [--truncate CHARS] [--header 'K: V']
+            [--identify-as-probe] [--timeout SECONDS] [--help] [--version]  URL
 ```
 
 | Option | |
@@ -111,34 +111,34 @@ mcp-probe [--json | --transcript] [--request {info,tools,resources,prompts}]
 | `--json`, `-j` | server replies as JSON (keyed by method; pages collated) |
 | `--transcript`, `-t` | verbatim HTTP exchanges including credentials (`*` notes, `>` sent, `<` received) |
 | `--request`, `-r` | probe a section even if unadvertised; repeatable (default: auto-detect) |
-| `--era`, `-e` | protocol era to probe (default: auto-detect). `modern` = 2026-07-28 and later: stateless, per-request metadata, no handshake. `legacy` = 2025-11-25 and earlier: `initialize` handshake, then an `Mcp-Session-Id` header on every request |
+| `--era`, `-e` | protocol era to use (default: auto-detect). `modern` = 2026-07-28 and later: stateless, per-request metadata, no handshake. `legacy` = 2025-11-25 and earlier: `initialize` handshake, then an `Mcp-Session-Id` header on every request |
 | `--truncate` | truncate long values to CHARS (default: none) |
 | `--header` | extra request header; repeatable |
-| `--identify-as-probe` | announce as mcp-probe, don't impersonate Claude Code |
+| `--identify-as-probe` | announce as mcp-inspect, don't impersonate Claude Code |
 | `--timeout` | per-request timeout in seconds (default: 30) |
 
-Exit status is 0 if the probe completes, 1 if it fails, 2 on a usage error.
+Exit status is 0 on successful completion, 1 on probe failure, 2 on a usage error.
 
 
 ## Install
 
 Just `scp` or `curl` the script onto a box and run it. Or clone the repo and
-drop `mcp-probe` in your PATH (and, optionally, `_mcp-probe` in zsh's FPATH),
+drop `mcp-inspect` in your PATH (and, optionally, `_mcp-inspect` in zsh's FPATH),
 e.g.:
 <!-- or pip install, or uvx... -->
 
 ```
-INSTALL_PATH=~/.local/share/mcp-probe
-git clone https://github.com/jeremy-dolan/mcp-probe.git $INSTALL_PATH
-ln -s $INSTALL_PATH/mcp-probe ~/.local/bin/
-ln -s $INSTALL_PATH/completions/zsh/_mcp-probe ~/.zsh/completions/
+INSTALL_PATH=~/.local/share/mcp-inspect
+git clone https://github.com/jeremy-dolan/mcp-inspect.git $INSTALL_PATH
+ln -s $INSTALL_PATH/mcp-inspect ~/.local/bin/
+ln -s $INSTALL_PATH/completions/zsh/_mcp-inspect ~/.zsh/completions/
 ```
 
 
 ## Example (default mode)
 
 ```
-$ mcp-probe https://example.com/mcp
+$ mcp-inspect https://example.com/mcp
 => POST server/discover
 <= 400 Bad Request  application/json
 

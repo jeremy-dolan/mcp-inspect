@@ -1,9 +1,9 @@
-#compdef mcp-probe
+#compdef mcp-inspect
 
-# zsh completion for mcp-probe.
+# zsh completion for mcp-inspect.
 # Place in $fpath and (re)run compinit.
 
-_mcp-probe_url() {
+_mcp-inspect_url() {
   local -a expl
   if [[ $PREFIX != (http|https)://* ]]; then
     _wanted schemes expl 'scheme' \
@@ -12,7 +12,7 @@ _mcp-probe_url() {
   _urls
 }
 
-_mcp-probe() {
+_mcp-inspect() {
   local curcontext=$curcontext state line ret=1
   typeset -A opt_args
 
@@ -20,12 +20,12 @@ _mcp-probe() {
   # neither can follow the other. --help and --version each end the line.
   _arguments -s -S -C \
     '(--json -j --transcript -t)'{--json,-j}'[server replies as JSON (keyed by method; pages collated)]' \
-    '(--json -j --transcript -t)'{--transcript,-t}'[verbatim HTTP exchanges including credentials (> sent, < received)]' \
+    '(--json -j --transcript -t)'{--transcript,-t}'[verbatim HTTP exchanges including credentials (* notes, > sent, < received)]' \
     \*{--request=,-r+}'[probe a section even if unadvertised; repeatable (default: auto-detect)]:section:->section' \
-    '(--era -e)'{--era=,-e+}'[protocol era to probe (default: auto-detect)]:era:->era' \
+    '(--era -e)'{--era=,-e+}'[protocol era to use (default: auto-detect)]:era:->era' \
     '--truncate=[truncate long values to CHARS (default: none)]:characters:->truncate' \
     \*'--header=[extra request header; repeatable]:header:->header' \
-    "--identify-as-probe[announce as mcp-probe, don't impersonate Claude Code]" \
+    "--identify-as-probe[announce as mcp-inspect, don't impersonate Claude Code]" \
     '--timeout=[per-request timeout in seconds (default: 30)]:seconds:->timeout' \
     '(- : *)--help[show this help message and exit]' \
     '(- : *)--version[show version number and exit]' \
@@ -77,11 +77,11 @@ _mcp-probe() {
       ;;
 
     url)
-      _mcp-probe_url && ret=0
+      _mcp-inspect_url && ret=0
       ;;
   esac
 
   return ret
 }
 
-_mcp-probe "$@"
+_mcp-inspect "$@"

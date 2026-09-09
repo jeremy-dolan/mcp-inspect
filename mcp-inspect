@@ -3,7 +3,7 @@
 # Licensed under the MIT License. See LICENSE for details.
 
 """
-Inspect MCP server metadata and available tools, resources, and prompts
+Examine an MCP server's metadata, tools, resources, and prompts
 
 Speaks both eras of the Streamable HTTP transport:
 
@@ -39,7 +39,7 @@ Additionally, two data streaming modes are available:
 
 By default the probe impersonates a real client (Claude Code) so that a server
 which serves auditors one set of tool descriptions and real clients another
-answers as though to a real client. --identify-as-probe announces mcp-probe
+answers as though to a real client. --identify-as-probe announces mcp-inspect
 instead.
 
 Server text can carry terminal escape sequences, so every string that reaches
@@ -62,7 +62,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
-TOOL_INFO = {"name": "mcp-probe", "version": "0.3.0"}
+TOOL_INFO = {"name": "mcp-inspect", "version": "0.3.0"}
 
 # A server with something to hide has every reason to behave when it can tell
 # it is being audited, and the client's identity is what it would read to find
@@ -1730,16 +1730,16 @@ def header(value: str) -> tuple:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = ArgumentParser(
-        prog="mcp-probe",
+        prog="mcp-inspect",
         add_help=False,
         formatter_class=HelpFormatter,
-        description="Inspect MCP server metadata and available tools, resources, and prompts",
+        description="Examine an MCP server's metadata, tools, resources, and prompts",
         epilog="environment:\n"
                "  MCP_AUTH_TOKEN  if set, sent as an Authorization: Bearer header\n"
                "\n"
                "exit status:\n"
-               "  0  the probe completed\n"
-               "  1  the probe failed\n"
+               "  0  successful completion\n"
+               "  1  probe failure\n"
                "  2  usage error",
     )
     output = parser.add_mutually_exclusive_group()
@@ -1753,7 +1753,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         choices=CHOICES, metavar="{info,tools,resources,prompts}",
                         help="probe a section even if unadvertised; repeatable (default: auto-detect)")
     parser.add_argument("--era", "-e", choices=("auto", "modern", "legacy"), default="auto",
-                        help="protocol era to probe (default: auto-detect). "
+                        help="protocol era to use (default: auto-detect). "
                              "modern = 2026-07-28 and later: stateless, "
                              "per-request metadata, no handshake. "
                              "legacy = 2025-11-25 and earlier: initialize "
@@ -1766,7 +1766,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--header", action="append", default=[], type=header,
                         metavar="'K: V'", help="extra request header; repeatable")
     parser.add_argument("--identify-as-probe", action="store_true",
-                        help="announce as mcp-probe, don't impersonate Claude Code")
+                        help="announce as mcp-inspect, don't impersonate Claude Code")
     parser.add_argument("--timeout", type=float, default=30.0, metavar="SECONDS",
                         help="per-request timeout in seconds (default: 30)")
     parser.add_argument("--help", action="help",
@@ -1822,7 +1822,7 @@ def main(argv: list[str] | None = None) -> int:
             if options.reporter.enabled:
                 options.reporter.problem(oneline(str(error)))
             else:
-                print(f"mcp-probe: {safe(oneline(str(error)))}", file=sys.stderr)
+                print(f"mcp-inspect: {safe(oneline(str(error)))}", file=sys.stderr)
     finally:
         if transport is not None:
             transport.close()
