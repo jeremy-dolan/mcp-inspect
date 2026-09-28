@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Jeremy Dolan
+# Copyright 2026 Jeremy Dolan
 # Licensed under the MIT License. See LICENSE for details.
+# https://github.com/jeremy-dolan/mcp-inspect
 
 """
 Examine an MCP server's metadata, tools, resources, and prompts
@@ -1538,7 +1539,6 @@ def server_identity(info: dict) -> str | None:
 
 
 SECTIONS = ("tools", "resources", "prompts")
-CHOICES = ("info",) + SECTIONS
 CAPABILITY = {"tools": "tools", "resources": "resources", "prompts": "prompts"}
 LIST_METHOD = {"tools": "tools/list", "resources": "resources/list", "prompts": "prompts/list"}
 TEMPLATES_METHOD = "resources/templates/list"
@@ -1657,7 +1657,7 @@ def summarise(url: str, transport: Transport | None, info: dict | None,
         elif kind in selected:
             rows.append((kind, "not reached"))  # the probe stopped before it
         else:
-            rows.append((kind, "not probed"))   # --request excluded it
+            rows.append((kind, "not probed"))   # --list or --info-only excluded it
     return rows
 
 
@@ -1741,14 +1741,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     output = parser.add_mutually_exclusive_group()
     output.add_argument("--json", "-j", action="store_true",
-                        help="server replies as JSON (keyed by method; pages collated)")
+                        help="print server replies as normalized JSON (keyed by method; pages collated)")
     output.add_argument("--transcript", "-t", action="store_true",
-                        help="verbatim HTTP exchanges including credentials (* notes, > sent, < received)")
+                        help="print verbatim HTTP exchanges including credentials (* notes, > sent, < received)")
     parser.add_argument("url", metavar="URL", type=endpoint,
                         help="MCP endpoint (http:// or https://)")
-    parser.add_argument("--request", "-r", action="append", dest="requests",
-                        choices=CHOICES, metavar="{info,tools,resources,prompts}",
-                        help="probe a section even if unadvertised; repeatable (default: auto-detect)")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--info-only", action="store_true",
+                           help="show server identity and capabilities without listing items")
+    selection.add_argument("--list", action="append", dest="lists", choices=SECTIONS,
+                           help="list tools, resources, or prompts "
+                                "(repeatable; default: advertised sections)")
     parser.add_argument("--era", "-e", choices=("auto", "modern", "legacy"), default="auto",
                         help="protocol era to use (default: auto-detect). "
                              "modern = 2026-07-28 and later: stateless, "
@@ -1758,12 +1761,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "every request")
     parser.add_argument("--truncate", type=characters, default=TRUNCATE_DEFAULT,
                         metavar="CHARS",
-                        help="truncate long values to CHARS "
+                        help="truncate long response values to CHARS "
                              f"(default: {TRUNCATE_DEFAULT or 'none'})")
     parser.add_argument("--header", action="append", default=[], type=header,
-                        metavar="'K: V'", help="extra request header; repeatable")
+                        metavar="'K: V'", help="extra request header (repeatable)")
     parser.add_argument("--identify-as-probe", action="store_true",
-                        help="announce as mcp-inspect, don't impersonate Claude Code")
+                        help="announce as mcp-inspect (don't impersonate Claude Code)")
     parser.add_argument("--timeout", type=float, default=30.0, metavar="SECONDS",
                         help="per-request timeout in seconds (default: 30)")
     parser.add_argument("--help", action="help",
@@ -1794,9 +1797,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     options = build_options(args)
 
-    requested = args.requests or []
+    requested = args.lists or []
     explicit = [kind for kind in SECTIONS if kind in requested]
-    kinds = explicit or ([] if "info" in requested else list(SECTIONS))
+    kinds = explicit or ([] if args.info_only else list(SECTIONS))
 
     status = 0
     transport: Transport | None = None

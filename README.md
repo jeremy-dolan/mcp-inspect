@@ -14,9 +14,8 @@ Uses:
   introduction to security considerations, see [MCP Security and
   You](#mcp-security-and-you), below.)
 * **Debugging:** Use `--transcript` to see HTTP exchanges verbatim.
-* **Scripting:** Use `--json` for normalized, machine-readable output
-  to compare server responses across time (monitoring for changes) or across
-  identities (with `--identify-as-probe`).
+* **Scripting:** Use `--json` for normalized, machine-readable output. Compare
+  server responses across time or identities (see `--identify-as-probe`).
 
 By default, mcp-inspect impersonates Claude Code to examine what a server
 presents to real agents. A malicious server might otherwise recognize an
@@ -101,38 +100,51 @@ and then compare with [diff-json](https://github.com/jeremy-dolan/terminal-tools
 ## Usage
 
 ```
-mcp-inspect [--json | --transcript] [--request {info,tools,resources,prompts}]
+mcp-inspect [--json | --transcript]
+            [--info-only | --list {tools,resources,prompts}]
             [--era {auto,modern,legacy}] [--truncate CHARS] [--header 'K: V']
             [--identify-as-probe] [--timeout SECONDS] [--help] [--version]  URL
 ```
 
 | Option | |
 | --- | --- |
-| `--json`, `-j` | server replies as JSON (keyed by method; pages collated) |
-| `--transcript`, `-t` | verbatim HTTP exchanges including credentials (`*` notes, `>` sent, `<` received) |
-| `--request`, `-r` | probe a section even if unadvertised; repeatable (default: auto-detect) |
+| `--json`, `-j` | print server replies as normalized JSON (keyed by method; pages collated) |
+| `--transcript`, `-t` | print verbatim HTTP exchanges including credentials (`*` notes, `>` sent, `<` received) |
+| `--info-only` | show server identity and capabilities without listing items |
+| `--list` | list tools, resources, or prompts (repeatable; default: advertised sections) |
 | `--era`, `-e` | protocol era to use (default: auto-detect). `modern` = 2026-07-28 and later: stateless, per-request metadata, no handshake. `legacy` = 2025-11-25 and earlier: `initialize` handshake, then an `Mcp-Session-Id` header on every request |
-| `--truncate` | truncate long values to CHARS (default: none) |
-| `--header` | extra request header; repeatable |
-| `--identify-as-probe` | announce as mcp-inspect, don't impersonate Claude Code |
+| `--truncate` | truncate long response values to CHARS (default: none) |
+| `--header` | extra request header (repeatable) |
+| `--identify-as-probe` | announce as mcp-inspect (don't impersonate Claude Code) |
 | `--timeout` | per-request timeout in seconds (default: 30) |
+
+By default, mcp-inspect shows server information and lists advertised tools,
+resources, and prompts. Use `--info-only` to skip listing, or `--list` to select
+sections—even those the server doesn't advertise. These flags are mutually
+exclusive. Repeat `--list` to select multiple sections, for example
+`--list tools --list prompts`.
+
+`--truncate CHARS` shortens individual values in the default report. JSON and
+transcript output remain complete.
 
 Exit status is 0 on successful completion, 1 on probe failure, 2 on a usage error.
 
 
 ## Install
 
-Just `scp` or `curl` the script onto a box and run it. Or clone the repo and
-drop `mcp-inspect` in your PATH (and, optionally, `_mcp-inspect` in zsh's FPATH),
-e.g.:
-<!-- or pip install, or uvx... -->
+There are no third-party dependencies, so you can simply `scp` or `curl` the
+script onto a box and run it.
 
+For a full install, clone the repo, link `mcp-inspect` in your PATH (and,
+optionally, the appropriate shell completion `_mcp-inspect` in zsh's FPATH), e.g.:
 ```
 INSTALL_PATH=~/.local/share/mcp-inspect
 git clone https://github.com/jeremy-dolan/mcp-inspect.git $INSTALL_PATH
 ln -s $INSTALL_PATH/mcp-inspect ~/.local/bin/
-ln -s $INSTALL_PATH/completions/zsh/_mcp-inspect ~/.zsh/completions/
+ln -s $INSTALL_PATH/completions/zsh/_mcp-inspect ~/.local/share/zsh/site-functions/
 ```
+
+<!-- Or, install using pipx: `pipx install mcp-inspect` -->
 
 
 ## Example (default mode)

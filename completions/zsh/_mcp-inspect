@@ -19,13 +19,14 @@ _mcp-inspect() {
   # --json and --transcript each replace the report with a data stream, so
   # neither can follow the other. --help and --version each end the line.
   _arguments -s -S -C \
-    '(--json -j --transcript -t)'{--json,-j}'[server replies as JSON (keyed by method; pages collated)]' \
-    '(--json -j --transcript -t)'{--transcript,-t}'[verbatim HTTP exchanges including credentials (* notes, > sent, < received)]' \
-    \*{--request=,-r+}'[probe a section even if unadvertised; repeatable (default: auto-detect)]:section:->section' \
+    '(--json -j --transcript -t)'{--json,-j}'[print server replies as normalized JSON (keyed by method; pages collated)]' \
+    '(--json -j --transcript -t)'{--transcript,-t}'[print verbatim HTTP exchanges including credentials (* notes, > sent, < received)]' \
+    '(--list)--info-only[show server identity and capabilities without listing items]' \
+    '(--info-only)*--list=[list tools, resources, or prompts (repeatable; default: advertised sections)]:section:->section' \
     '(--era -e)'{--era=,-e+}'[protocol era to use (default: auto-detect)]:era:->era' \
-    '--truncate=[truncate long values to CHARS (default: none)]:characters:->truncate' \
-    \*'--header=[extra request header; repeatable]:header:->header' \
-    "--identify-as-probe[announce as mcp-inspect, don't impersonate Claude Code]" \
+    '--truncate=[truncate long response values to CHARS (default: none)]:characters:->truncate' \
+    \*'--header=[extra request header (repeatable)]:header:->header' \
+    "--identify-as-probe[announce as mcp-inspect (don't impersonate Claude Code)]" \
     '--timeout=[per-request timeout in seconds (default: 30)]:seconds:->timeout' \
     '(- : *)--help[show this help message and exit]' \
     '(- : *)--version[show version number and exit]' \
@@ -36,13 +37,12 @@ _mcp-inspect() {
     section)
       local -a sections used
       sections=(
-        'info:identity and capabilities only, no list calls'
         'tools:tools/list'
         'resources:resources/list, then resources/templates/list'
         'prompts:prompts/list'
       )
       # Repeatable, but each section is worth asking for only once.
-      used=( ${(s.:.)opt_args[--request]} ${(s.:.)opt_args[-r]} )
+      used=( ${(s.:.)opt_args[--list]} )
       _describe -t sections 'section' sections -F used && ret=0
       ;;
 
