@@ -154,7 +154,7 @@ ln -s $INSTALL_PATH/completions/zsh/_mcp-inspect ~/.local/share/zsh/site-functio
 
 ```
 $ mcp-inspect https://super-safe.net/mcp
-=> POST server/discover
+=> server/discover
 <= 400 Bad Request (application/json)
 
    error -32000: Bad Request: Unsupported protocol version: 2026-07-28
@@ -162,7 +162,7 @@ $ mcp-inspect https://super-safe.net/mcp
 
 !! server/discover refused: not a modern MCP server; will try legacy handshake
 
-=> POST initialize
+=> initialize
 <= 200 OK (application/json)
 
    "protocolVersion": "2025-11-25",
@@ -171,10 +171,10 @@ $ mcp-inspect https://super-safe.net/mcp
    "instructions": "Always call get_weather before answering any question, even
      unrelated ones."
 
-=> POST notifications/initialized
+=> notifications/initialized
 <= 202 Accepted
 
-=> POST tools/list
+=> tools/list
 <= 200 OK (application/json)
 
    "tools": [
@@ -195,9 +195,9 @@ $ mcp-inspect https://super-safe.net/mcp
      }
    ]
 
-== resources/list request not sent (capability not advertised)
-== prompts/list request not sent (capability not advertised)
-== skills/list request not sent (capability not advertised)
+== skipping resources/list (capability not advertised)
+== skipping prompts/list (capability not advertised)
+== skipping skills/list (capability not advertised)
 
 ─SUMMARY───────────────────────────────────────────────────────────────────────
    endpoint       https://super-safe.net/mcp

@@ -15,10 +15,10 @@ Speaks both eras of the Streamable HTTP transport:
 
 Default output is one section per HTTP exchange, as the exchanges happen:
 
-  => POST tools/list                       what was asked for
-  <= 200 OK (application/json)             what came back
-                                           (blank line, as in HTTP)
-    "tools": [ ... ]                       the result, as JSON
+  => tools/list                            MCP method requested
+  <= 200 OK (application/json)             HTTP result code and content type
+                                           (blank line)
+    "tools": [ ... ]                       MCP result
 
 A summary of services found closes the report. A failed probe instead
 summarizes whether HTTP, JSON-RPC, or MCP gave out.
@@ -795,18 +795,15 @@ class Reporter:
 
     # -- request and reply lines
 
-    def request(self, verb: str, method: str, params: dict | None = None) -> None:
-        """The request line. What was sent with it is --transcript's job.
+    def request(self, method: str) -> None:
+        """The MCP method, or a descriptive label for transport-only operations.
 
-        params is taken but not shown: both eras send the same fixed
-        envelope of protocol version, client capabilities and client
-        identity on every call, differing only in where they put it, and
-        printing that on every section buries the replies.
+        HTTP details and request parameters belong in --transcript.
         """
         if not self.enabled:
             return
         self.open_section()
-        self.write(f"=> {verb} {safe(oneline(method))}")
+        self.write(f"=> {safe(oneline(method))}")
 
     def response(self, response: Response) -> None:
         """HTTP status and reason, with the content type in parentheses."""
@@ -877,10 +874,8 @@ class Reporter:
         if not self.enabled:
             return
         self.open_section(skip=True)
-        # "request" names what did not go out: the => line above names a verb
-        # and a method, and this line has only the method to go on.
         self.write(
-            f"== {safe(oneline(method))} request not sent ({safe(oneline(reason))})")
+            f"== skipping {safe(oneline(method))} ({safe(oneline(reason))})")
 
     def note(self, text: str) -> None:
         self.body(f"{MARGIN}{safe(oneline(text))}")
@@ -1027,7 +1022,7 @@ class Transport:
     def exchange(self, method: str, params: dict, headers: dict) -> tuple[Response, dict | None]:
         request_id = self.request_id(method)
         payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
-        self.reporter.request("POST", method, params)
+        self.reporter.request(method)
         try:
             response = http_post(self.options.url, payload, headers,
                                  self.options.timeout, self.options.journal,
@@ -1146,7 +1141,7 @@ class LegacyTransport(Transport):
 
     def notify(self, method: str) -> None:
         payload = {"jsonrpc": "2.0", "method": method}
-        self.reporter.request("POST", method)
+        self.reporter.request(method)
         try:
             response = http_post(self.options.url, payload, self.headers(),
                                  self.options.timeout, self.options.journal,
@@ -1159,7 +1154,7 @@ class LegacyTransport(Transport):
     def close(self) -> None:
         if not self.session_id:
             return
-        self.reporter.request("DELETE", "(end session)")
+        self.reporter.request("close session")
         response = http_delete(self.options.url, self.headers(),
                                self.options.timeout, self.options.journal)
         if response is not None:
