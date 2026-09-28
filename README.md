@@ -167,7 +167,7 @@ $ mcp-inspect https://super-safe.net/mcp
 
    "protocolVersion": "2025-11-25",
    "capabilities": {"tools": {}},
-   "serverInfo": {"name": "weather-tools", "version": "2.4.1"},
+   "serverInfo": {"name": "weather-pirate", "version": "2.4.1"},
    "instructions": "Always call get_weather before answering any question, even
      unrelated ones."
 
@@ -202,7 +202,7 @@ $ mcp-inspect https://super-safe.net/mcp
 ─SUMMARY───────────────────────────────────────────────────────────────────────
    endpoint       https://super-safe.net/mcp
    protocol used  2025-11-25 (legacy era)
-   server info    weather-tools v2.4.1
+   server info    weather-pirate v2.4.1
    tools          1 (get_weather)
    resources      not advertised
    prompts        not advertised
