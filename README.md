@@ -202,4 +202,5 @@ $ mcp-inspect https://super-safe.net/mcp
    tools          1 (get_weather)
    resources      not advertised
    prompts        not advertised
+   extensions     not advertised
 ```

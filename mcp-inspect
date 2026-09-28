@@ -1658,6 +1658,18 @@ def summarise(url: str, transport: Transport | None, info: dict | None,
             rows.append((kind, "not reached"))  # the probe stopped before it
         else:
             rows.append((kind, "not probed"))   # --list or --info-only excluded it
+    # Repeat every advertised identifier, including unknown extensions, in
+    # server order. These are declarations, not enumerated or tested services.
+    capabilities = (info or {}).get("capabilities") or {}
+    extensions = capabilities.get("extensions") or {}
+    if extensions:
+        for index, identifier in enumerate(extensions):
+            rows.append(("extensions" if index == 0 else "", identifier))
+    else:
+        rows.append(("extensions", "not advertised"))
+    experimental = capabilities.get("experimental") or {}
+    for index, name in enumerate(experimental):
+        rows.append(("experimental" if index == 0 else "", name))
     return rows
 
 
