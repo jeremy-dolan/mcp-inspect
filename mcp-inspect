@@ -828,16 +828,18 @@ class Reporter:
     def evidence(self, response: Response) -> None:
         """The headers and body that explain a reply carrying no JSON-RPC.
 
+        Headers follow the status line; a blank line introduces the body.
         Indented, and the body collapsed to one line, so that nothing a
         server sends can start a line where this tool's own markers live.
         """
         for name in TELLTALE_HEADERS:
             value = response.headers.get(name)
             if value:
-                self.body(f"{MARGIN}{name.lower()}: {safe(oneline(value))}")
+                for line in fold(f"{MARGIN}{name}: {safe(oneline(value))}"):
+                    self.write(line)
         body = oneline(response.text)
         if body:
-            self.body(f"{MARGIN}body: {render_text(body, self.limit)}")
+            self.body(f"{MARGIN}{render_text(body, self.limit)}")
 
     def problem(self, headline: str, reading: str = "") -> bool:
         """What went wrong, under a "!!" marker: an outcome and a reading.
