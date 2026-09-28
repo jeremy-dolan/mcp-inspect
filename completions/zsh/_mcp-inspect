@@ -22,7 +22,7 @@ _mcp-inspect() {
     '(--json -j --transcript -t)'{--json,-j}'[print server replies as normalized JSON (keyed by method; pages collated)]' \
     '(--json -j --transcript -t)'{--transcript,-t}'[print verbatim HTTP exchanges including credentials (* notes, > sent, < received)]' \
     '(--list)--info-only[show server identity and capabilities without listing items]' \
-    '(--info-only)*--list=[list tools, resources, or prompts (repeatable; default: advertised sections)]:section:->section' \
+    '(--info-only)*--list=[list tools, resources, prompts, or skills (repeatable; default: advertised sections)]:section:->section' \
     '(--era -e)'{--era=,-e+}'[protocol era to use (default: auto-detect)]:era:->era' \
     '--truncate=[truncate long response values to CHARS (default: none)]:characters:->truncate' \
     \*'--header=[extra request header (repeatable)]:header:->header' \
@@ -40,6 +40,7 @@ _mcp-inspect() {
         'tools:tools/list'
         'resources:resources/list, then resources/templates/list'
         'prompts:prompts/list'
+        'skills:skills/list (Skills extension)'
       )
       # Repeatable, but each section is worth asking for only once.
       used=( ${(s.:.)opt_args[--list]} )

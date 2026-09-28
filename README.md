@@ -1,10 +1,10 @@
 # mcp-inspect
 
-Examine an MCP server's metadata, tools, resources, and prompts
+Examine an MCP server's metadata, tools, resources, prompts, and skills
 
 mcp-inspect is a standalone CLI utility for probing MCP servers over HTTP(S).
-By default, it prints server metadata and all available tools, resources, and
-prompts. It requires only Python 3.7+, with no third-party dependencies. Both
+By default, it prints server metadata and lists advertised tools, resources,
+prompts, and skills. It requires only Python 3.7+, with no third-party dependencies. Both
 the modern, stateless protocol (versions >= 2026-07-28) and legacy mode (<=
 2025-11-25) are supported.
 
@@ -101,7 +101,7 @@ and then compare with [diff-json](https://github.com/jeremy-dolan/terminal-tools
 
 ```
 mcp-inspect [--json | --transcript]
-            [--info-only | --list {tools,resources,prompts}]
+            [--list {tools,resources,prompts,skills} | --info-only]
             [--era {auto,modern,legacy}] [--truncate CHARS] [--header 'K: V']
             [--identify-as-probe] [--timeout SECONDS] [--help] [--version]  URL
 ```
@@ -110,29 +110,32 @@ mcp-inspect [--json | --transcript]
 | --- | --- |
 | `--json`, `-j` | print server replies as normalized JSON (keyed by method; pages collated) |
 | `--transcript`, `-t` | print verbatim HTTP exchanges including credentials (`*` notes, `>` sent, `<` received) |
-| `--info-only` | show server identity and capabilities without listing items |
-| `--list` | list tools, resources, or prompts (repeatable; default: advertised sections) |
+| `--list` | list tools, resources, prompts, or skills (repeatable; default: advertised sections) |
+| `--info-only` | show server identity and capabilities without enumerating primitives |
 | `--era`, `-e` | protocol era to use (default: auto-detect). `modern` = 2026-07-28 and later: stateless, per-request metadata, no handshake. `legacy` = 2025-11-25 and earlier: `initialize` handshake, then an `Mcp-Session-Id` header on every request |
-| `--truncate` | truncate long response values to CHARS (default: none) |
+| `--truncate` | truncate long response values to CHARS in default output mode (default: none) |
 | `--header` | extra request header (repeatable) |
 | `--identify-as-probe` | announce as mcp-inspect (don't impersonate Claude Code) |
 | `--timeout` | per-request timeout in seconds (default: 30) |
 
-By default, mcp-inspect shows server information and lists advertised tools,
-resources, and prompts. Use `--info-only` to skip listing, or `--list` to select
-sections—even those the server doesn't advertise. These flags are mutually
-exclusive. Repeat `--list` to select multiple sections, for example
-`--list tools --list prompts`.
+By default, `mcp-inspect` prints server information and lists primitives
+(tools, resources, prompts, skills) that are advertised. Use `--info-only` to
+skip listing, or `--list` to explicitly select what primitives to probe.
+(`--list` may be repeated to select multiple sections, *e.g.* `--list tools
+--list skills`.)
 
-`--truncate CHARS` shortens individual values in the default report. JSON and
-transcript output remain complete.
+Support for the "skills" primitive is based on the final version of the
+official [Skills over
+MCP](https://modelcontextprotocol.io/extensions/skills/overview) extension. Per
+the spec, skills may be listed as both resources and skills. Skills inspection
+include metadata and file manifests but the files themselves are not downloaed.
 
 Exit status is 0 on successful completion, 1 on probe failure, 2 on a usage error.
 
 
 ## Install
 
-There are no third-party dependencies, so you can simply `scp` or `curl` the
+There are no third-party dependencies; you can simply `scp` or `curl` the
 script onto a box and run it.
 
 For a full install, clone the repo, link `mcp-inspect` in your PATH (and,
@@ -194,6 +197,7 @@ $ mcp-inspect https://super-safe.net/mcp
 
 == resources/list request not sent (capability not advertised)
 == prompts/list request not sent (capability not advertised)
+== skills/list request not sent (capability not advertised)
 
 ─SUMMARY───────────────────────────────────────────────────────────────────────
    endpoint       https://super-safe.net/mcp

@@ -4,7 +4,7 @@
 # https://github.com/jeremy-dolan/mcp-inspect
 
 """
-Examine an MCP server's metadata, tools, resources, and prompts
+Examine an MCP server's metadata, tools, resources, prompts, and skills
 
 Speaks both eras of the Streamable HTTP transport:
 
@@ -181,6 +181,7 @@ CANONICAL_FIELDS = {
     "resources": ["uri", "name", "title", "description", "mimeType", "size", "annotations"],
     "resourceTemplates": ["uriTemplate", "name", "title", "description", "mimeType", "annotations"],
     "prompts": ["name", "title", "description", "arguments"],
+    "skills": ["uri", "frontmatter", "resources"],
 }
 
 
@@ -1457,7 +1458,7 @@ def render_properties(properties: Any, limit: int, indent: str) -> list[str]:
 # field's own line. A prompt's arguments are not among them: they carry their
 # own required flag, one per argument, so there is nothing to hoist out and
 # the list reads well enough as it came -- descriptions included.
-BLOCKS = {"inputSchema.properties": render_properties}
+BLOCKS = {"inputSchema.properties": render_properties, "frontmatter": render_properties}
 
 
 # ---------------------------------------------------------------- transcript
@@ -1538,10 +1539,17 @@ def server_identity(info: dict) -> str | None:
 # ---------------------------------------------------------------------- main
 
 
-SECTIONS = ("tools", "resources", "prompts")
-CAPABILITY = {"tools": "tools", "resources": "resources", "prompts": "prompts"}
-LIST_METHOD = {"tools": "tools/list", "resources": "resources/list", "prompts": "prompts/list"}
+CORE_SECTIONS = ("tools", "resources", "prompts")
+SECTIONS = CORE_SECTIONS + ("skills",)
+SKILLS_EXTENSION = "io.modelcontextprotocol/skills"
+LIST_METHOD = {kind: f"{kind}/list" for kind in SECTIONS}
 TEMPLATES_METHOD = "resources/templates/list"
+
+
+def is_advertised(capabilities: dict, kind: str) -> bool:
+    if kind == "skills":
+        return SKILLS_EXTENSION in (capabilities.get("extensions") or {})
+    return kind in capabilities
 
 
 def list_entries(transport: Transport, method: str, key: str,
@@ -1558,7 +1566,8 @@ def list_entries(transport: Transport, method: str, key: str,
         entries = result.get(key) or []
         total += len(entries)
         for entry in entries:
-            name = entry.get("name") if isinstance(entry, dict) else None
+            name = (dig(entry, "frontmatter.name" if key == "skills" else "name")
+                    if isinstance(entry, dict) else None)
             if isinstance(name, str) and name.strip():
                 names.append(safe(oneline(name)))
     return total, names
@@ -1570,7 +1579,7 @@ def probe(transport: Transport, info: dict, kinds: Iterable[str], explicit: bool
     capabilities = info.get("capabilities") or {}
     for kind in kinds:
         method = LIST_METHOD[kind]
-        if not explicit and CAPABILITY[kind] not in capabilities:
+        if not explicit and not is_advertised(capabilities, kind):
             reporter.skipped(method, "capability not advertised")
             outcome[kind] = "not advertised"
             continue
@@ -1640,10 +1649,12 @@ def summarise(url: str, transport: Transport | None, info: dict | None,
     if identity:
         rows.append(("server info", identity))
     selected = set(kinds)
+    capabilities = (info or {}).get("capabilities") or {}
     # Names have to fit the row they land in, which begins where the widest
     # label ends -- the column Reporter.summary lays the values out to.
     labels = [label for label, _ in rows] + list(SECTIONS)
     room = max(20, wrap_width() - len(MARGIN) - max(map(len, labels)) - 2)
+    section_rows = {}
     for kind in SECTIONS:
         found = outcome.get(kind)
         if isinstance(found, tuple):
@@ -1651,20 +1662,25 @@ def summarise(url: str, transport: Transport | None, info: dict | None,
             found_templates = outcome.get("templates") if kind == "resources" else 0
             note = (f"+{found_templates} template{'s' if found_templates > 1 else ''}"
                     if found_templates else "")
-            rows.append((kind, fit_names(count, names, note, room)))
+            section_rows[kind] = fit_names(count, names, note, room)
         elif found is not None:
-            rows.append((kind, found))
+            section_rows[kind] = found
         elif kind in selected:
-            rows.append((kind, "not reached"))  # the probe stopped before it
+            section_rows[kind] = "not reached"  # the probe stopped before it
         else:
-            rows.append((kind, "not probed"))   # --list or --info-only excluded it
+            # --list or --info-only excluded it; retain what discovery told us.
+            section_rows[kind] = ("advertised, not probed"
+                                  if is_advertised(capabilities, kind)
+                                  else "not advertised")
+    rows.extend((kind, section_rows[kind]) for kind in CORE_SECTIONS)
     # Repeat every advertised identifier, including unknown extensions, in
     # server order. These are declarations, not enumerated or tested services.
-    capabilities = (info or {}).get("capabilities") or {}
     extensions = capabilities.get("extensions") or {}
     if extensions:
         for index, identifier in enumerate(extensions):
             rows.append(("extensions" if index == 0 else "", identifier))
+            if identifier == SKILLS_EXTENSION:
+                rows.append(("  skills", section_rows["skills"]))
     else:
         rows.append(("extensions", "not advertised"))
     experimental = capabilities.get("experimental") or {}
@@ -1742,7 +1758,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="mcp-inspect",
         add_help=False,
         formatter_class=HelpFormatter,
-        description="Examine an MCP server's metadata, tools, resources, and prompts",
+        description="Examine an MCP server's metadata, tools, resources, prompts, and skills",
         epilog="environment:\n"
                "  MCP_AUTH_TOKEN  if set, sent as an Authorization: Bearer header\n"
                "\n"
@@ -1762,7 +1778,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     selection.add_argument("--info-only", action="store_true",
                            help="show server identity and capabilities without listing items")
     selection.add_argument("--list", action="append", dest="lists", choices=SECTIONS,
-                           help="list tools, resources, or prompts "
+                           help="list tools, resources, prompts, or skills "
                                 "(repeatable; default: advertised sections)")
     parser.add_argument("--era", "-e", choices=("auto", "modern", "legacy"), default="auto",
                         help="protocol era to use (default: auto-detect). "
