@@ -191,6 +191,9 @@ CANONICAL_FIELDS = {
 NO_HTTP = "nothing answered at this URL"
 NO_JSONRPC = "no JSON-RPC here, so no MCP"
 NO_MCP = "JSON-RPC works here, but no MCP"
+# Not a layer of its own but a gate in front of all three: until it opens,
+# nothing past it can be told apart, so the verdict says only that it is shut.
+AUTH_REQUIRED = "authorization required; nothing past it was probed"
 MCP_REFUSED = "an MCP server, but it refused this probe"
 
 
@@ -1038,6 +1041,8 @@ class Transport:
         message = select(parse_messages(response), request_id)
         if message is not None:
             self.options.journal.record_message(method, message)
+        if auth_challenge(response):
+            raise unauthorized(method, response, message, self.options)
         return response, message
 
     def call(self, method: str, params: dict | None = None) -> dict:
@@ -1222,6 +1227,38 @@ def diagnose(response: Response, url: str) -> str:
     if urllib.parse.urlsplit(url).path in ("", "/"):
         return PATH_HINT
     return ""
+
+
+def auth_challenge(response: Response) -> bool:
+    """This reply is a demand for credentials, not an answer to the request.
+
+    A 401 always is. A 403 is only when it carries a challenge -- that is
+    insufficient_scope; a bare 403 is just as often an edge filter. Either
+    way the server has said nothing yet about what it serves, and whatever
+    JSON-RPC error rides along in the body is the auth layer talking, not
+    MCP: read as a refusal of the method, it rules out an MCP server that
+    was never reached.
+    """
+    return response.status == 401 or (
+        response.status == 403 and bool(response.headers.get("WWW-Authenticate")))
+
+
+def unauthorized(method: str, response: Response, message: dict | None,
+                 options: "Options") -> ProbeError:
+    """Report a demand for credentials, and end the probe there.
+
+    No fallback: the legacy handshake goes to the same URL and meets the
+    same gate.
+    """
+    options.reporter.evidence(response)
+    sent = any(name.lower() == "authorization" for name in options.extra_headers)
+    reading = ("the credentials sent were not accepted" if sent
+               else "this server requires credentials")
+    reported = options.reporter.problem(f"{method}: authorization required", reading)
+    if not sent:
+        options.reporter.hint(diagnose(response, options.url))
+    return ProbeError(f"{method}: HTTP {response.status}, {reading}",
+                      reported=reported, verdict=AUTH_REQUIRED)
 
 
 def no_reply(method: str, response: Response, options: "Options") -> ProbeError:
