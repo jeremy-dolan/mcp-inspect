@@ -1243,6 +1243,10 @@ def auth_challenge(response: Response) -> bool:
         response.status == 403 and bool(response.headers.get("WWW-Authenticate")))
 
 
+PLACEHOLDER_HINT = ("Some servers check the token only when a tool is called, "
+                    "so a placeholder may be enough to list: MCP_AUTH_TOKEN=x")
+
+
 def unauthorized(method: str, response: Response, message: dict | None,
                  options: "Options") -> ProbeError:
     """Report a demand for credentials, and end the probe there.
@@ -1257,6 +1261,10 @@ def unauthorized(method: str, response: Response, message: dict | None,
     reported = options.reporter.problem(f"{method}: authorization required", reading)
     if not sent:
         options.reporter.hint(diagnose(response, options.url))
+        # Never sent unasked: a made-up credential is the user's call. But
+        # a server that lists for any token shows its tools before an OAuth
+        # grant, which is when reading them is worth the most.
+        options.reporter.hint(PLACEHOLDER_HINT)
     return ProbeError(f"{method}: HTTP {response.status}, {reading}",
                       reported=reported, verdict=AUTH_REQUIRED)
 

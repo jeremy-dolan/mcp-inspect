@@ -48,6 +48,7 @@ class AuthTests(unittest.TestCase):
                 self.assertNotIn(APP['NO_MCP'], output)
                 self.assertIn('WWW-Authenticate', output)
                 self.assertIn('MCP_AUTH_TOKEN', output)
+                self.assertIn(APP['PLACEHOLDER_HINT'], ' '.join(output.split()))
 
     def test_401_without_body(self):
         code, output, _, _ = self.run_cli(body=False, challenge=False)
@@ -58,6 +59,7 @@ class AuthTests(unittest.TestCase):
         code, output, _, _ = self.run_cli(env={'MCP_AUTH_TOKEN': 'bad'})
         self.assertIn('credentials sent were not accepted', ' '.join(output.split()))
         self.assertNotIn('Set the MCP_AUTH_TOKEN', output)
+        self.assertNotIn('placeholder', output)
 
     def test_403_with_challenge_is_auth_but_bare_403_is_not(self):
         _, output, _, _ = self.run_cli(status=403)
