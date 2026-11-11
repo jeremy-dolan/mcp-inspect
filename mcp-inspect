@@ -192,8 +192,11 @@ NO_HTTP = "nothing answered at this URL"
 NO_JSONRPC = "no JSON-RPC here, so no MCP"
 NO_MCP = "JSON-RPC works here, but no MCP"
 # Not a layer of its own but a gate in front of all three: until it opens,
-# nothing past it can be told apart, so the verdict says only that it is shut.
-AUTH_REQUIRED = "authorization required; nothing past it was probed"
+# nothing past it can be told apart, so the verdict says only that it is shut
+# -- and, where the challenge names OAuth protected-resource metadata (RFC
+# 9728, as MCP authorization uses), that a real client would log in here.
+AUTH_REQUIRED = "authorization required"
+AUTH_REQUIRED_OAUTH = "authorization required (OAuth)"
 MCP_REFUSED = "an MCP server, but it refused this probe"
 
 
@@ -1266,7 +1269,12 @@ def unauthorized(method: str, response: Response, message: dict | None,
         # grant, which is when reading them is worth the most.
         options.reporter.hint(PLACEHOLDER_HINT)
     return ProbeError(f"{method}: HTTP {response.status}, {reading}",
-                      reported=reported, verdict=AUTH_REQUIRED)
+                      reported=reported, verdict=auth_verdict(response))
+
+
+def auth_verdict(response: Response) -> str:
+    challenge = (response.headers.get("WWW-Authenticate") or "").lower()
+    return AUTH_REQUIRED_OAUTH if "resource_metadata=" in challenge else AUTH_REQUIRED
 
 
 def no_reply(method: str, response: Response, options: "Options") -> ProbeError:

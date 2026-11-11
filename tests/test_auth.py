@@ -23,7 +23,7 @@ class AuthTests(unittest.TestCase):
             calls.append(payload['method'])
             reply = {'Content-Type': 'application/json'}
             if challenge:
-                reply['WWW-Authenticate'] = CHALLENGE
+                reply['WWW-Authenticate'] = CHALLENGE if challenge is True else challenge
             message = {'jsonrpc': '2.0', 'id': None,
                        'error': {'code': -32000, 'message': 'Unauthorized'}}
             return APP['Response'](status, reply,
@@ -44,7 +44,7 @@ class AuthTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(calls, [method])  # no legacy fallback
                 summary = output.split('SUMMARY')[-1]
-                self.assertIn(APP['AUTH_REQUIRED'], summary)
+                self.assertIn(APP['AUTH_REQUIRED_OAUTH'], summary)
                 self.assertNotIn(APP['NO_MCP'], output)
                 self.assertIn('WWW-Authenticate', output)
                 self.assertIn('MCP_AUTH_TOKEN', output)
@@ -53,7 +53,15 @@ class AuthTests(unittest.TestCase):
     def test_401_without_body(self):
         code, output, _, _ = self.run_cli(body=False, challenge=False)
         self.assertEqual(code, 1)
-        self.assertIn(APP['AUTH_REQUIRED'], output)
+        summary = output.split('SUMMARY')[-1]
+        self.assertIn(APP['AUTH_REQUIRED'], summary)
+        self.assertNotIn('OAuth', summary)
+
+    def test_bare_bearer_challenge_is_not_called_oauth(self):
+        _, output, _, _ = self.run_cli(challenge='Bearer realm="api"')
+        summary = output.split('SUMMARY')[-1]
+        self.assertIn(APP['AUTH_REQUIRED'], summary)
+        self.assertNotIn('OAuth', summary)
 
     def test_rejected_credentials_say_so(self):
         code, output, _, _ = self.run_cli(env={'MCP_AUTH_TOKEN': 'bad'})
